@@ -654,6 +654,69 @@ function buildWordStudyLibrary(readings) {
 
 const WORD_STUDY_LIBRARY = buildWordStudyLibrary(READINGS)
 
+const FLOATING_UI_MARGIN = 12
+const FLOATING_UI_TOP_SAFE = 76
+const MOBILE_BOTTOM_SAFE = 164
+const DESKTOP_BOTTOM_SAFE = 24
+
+const clamp = (value, min, max) => Math.min(Math.max(value, min), max)
+
+const getViewportSafeBottom = () => (
+  window.matchMedia?.('(max-width: 900px)').matches ? MOBILE_BOTTOM_SAFE : DESKTOP_BOTTOM_SAFE
+)
+
+const supportsHoverTooltips = () => (
+  !window.matchMedia?.('(hover: none), (pointer: coarse)').matches
+)
+
+const getFloatingRect = (range) => {
+  const clientRect = Array.from(range.getClientRects()).find((rect) => rect.width > 0 || rect.height > 0)
+  const boundingRect = range.getBoundingClientRect()
+  return clientRect || boundingRect
+}
+
+const getSelectionMenuPosition = (rect) => {
+  const viewportWidth = window.innerWidth
+  const viewportHeight = window.innerHeight
+  const estimatedMenuWidth = Math.min(340, viewportWidth - FLOATING_UI_MARGIN * 2)
+  const estimatedMenuHeight = 58
+  const safeBottom = viewportHeight - getViewportSafeBottom()
+  const x = clamp(
+    rect.left + rect.width / 2,
+    FLOATING_UI_MARGIN + estimatedMenuWidth / 2,
+    viewportWidth - FLOATING_UI_MARGIN - estimatedMenuWidth / 2,
+  )
+
+  let y = rect.top - estimatedMenuHeight - FLOATING_UI_MARGIN
+  if (y < FLOATING_UI_TOP_SAFE) {
+    y = rect.bottom + FLOATING_UI_MARGIN
+  }
+
+  return {
+    x,
+    y: clamp(y, FLOATING_UI_TOP_SAFE, Math.max(FLOATING_UI_TOP_SAFE, safeBottom - estimatedMenuHeight)),
+  }
+}
+
+const getTooltipPosition = (rect) => {
+  const viewportWidth = window.innerWidth
+  const viewportHeight = window.innerHeight
+  const width = Math.min(352, viewportWidth - FLOATING_UI_MARGIN * 2)
+  const height = Math.min(320, viewportHeight - FLOATING_UI_TOP_SAFE - getViewportSafeBottom())
+  const safeBottom = viewportHeight - getViewportSafeBottom()
+  const left = clamp(rect.left, FLOATING_UI_MARGIN, viewportWidth - width - FLOATING_UI_MARGIN)
+
+  let top = rect.bottom + FLOATING_UI_MARGIN
+  if (top + height > safeBottom) {
+    top = rect.top - height - FLOATING_UI_MARGIN
+  }
+
+  return {
+    left,
+    top: clamp(top, FLOATING_UI_TOP_SAFE, Math.max(FLOATING_UI_TOP_SAFE, safeBottom - height)),
+  }
+}
+
 function BibleReaderPage() {
   const { mode, themeName, themes, toggleMode, setThemeName } = useTheme()
 
@@ -1124,23 +1187,36 @@ function BibleReaderPage() {
   const handleSelection = () => {
     window.setTimeout(() => {
       const selection = window.getSelection()
-      if (!selection || selection.isCollapsed || selection.toString().trim().length === 0) {
+      if (!selection || selection.rangeCount === 0 || selection.isCollapsed || selection.toString().trim().length === 0) {
         setSelectionMenu((current) => ({ ...current, open: false }))
         return
       }
 
-      const range = selection.getRangeAt(0)
-      const rect = range.getBoundingClientRect()
+      let range
+      try {
+        range = selection.getRangeAt(0)
+      } catch {
+        setSelectionMenu((current) => ({ ...current, open: false }))
+        return
+      }
+
+      const rect = getFloatingRect(range)
+      if (!rect || (rect.width === 0 && rect.height === 0)) {
+        setSelectionMenu((current) => ({ ...current, open: false }))
+        return
+      }
+
       const tokenIds = Object.entries(tokenRefs.current)
         .filter(([, node]) => node && selection.containsNode(node, true) && node.textContent.trim().length > 0)
         .map(([tokenId]) => tokenId)
+      const position = getSelectionMenuPosition(rect)
 
       setSelectionMenu({
         open: true,
         text: selection.toString().trim(),
         tokenIds,
-        x: rect.left + rect.width / 2,
-        y: rect.top - 55,
+        x: position.x,
+        y: position.y,
       })
     }, 50)
   }
@@ -1234,6 +1310,8 @@ function BibleReaderPage() {
   }
 
   const handleVerseSelect = (verseNumber, extendSelection = false) => {
+    setTooltip(null)
+    setSelectionMenu((current) => ({ ...current, open: false }))
     setSelectedVerseNumbers((current) => {
       if (!reading) return current
       if (!extendSelection || current.length === 0) return [verseNumber]
@@ -1724,8 +1802,10 @@ function BibleReaderPage() {
         }
         .type-btn:hover { background: rgba(255,255,255,0.08); color: rgb(var(--c-accent)); }
         .reader-theme-ui {
-          position: fixed; bottom: 1.5rem; right: 1.5rem; z-index: 60;
+          position: fixed; bottom: 1.5rem; right: 1.5rem; z-index: 130;
           display: flex; flex-direction: column; align-items: flex-end; gap: .75rem;
+          max-width: calc(100vw - 2rem);
+          pointer-events: none;
         }
         .reader-theme-panel {
           background: rgba(var(--c-bg), 0.8);
@@ -1750,6 +1830,7 @@ function BibleReaderPage() {
           border:1px solid rgba(var(--c-text),0.2);
           padding:.35rem; border-radius:999px;
           box-shadow:0 20px 40px rgba(0,0,0,0.32);
+          pointer-events: auto;
         }
         .reader-theme-button, .reader-mode-button {
           width:2.5rem; height:2.5rem; display:grid; place-items:center;
@@ -2214,7 +2295,7 @@ function BibleReaderPage() {
           font-family: var(--f-mono); font-size: .75rem; color: rgba(var(--c-text),0.4); text-transform: uppercase; letter-spacing: .16em;
         }
         .lexicon-tooltip {
-          position: fixed; z-index: 100; max-width: 22rem; pointer-events:none;
+          position: fixed; z-index: 170; width: min(22rem, calc(100vw - 1.5rem)); max-height: min(70vh, 28rem); overflow:auto; pointer-events:none;
           background: rgba(var(--c-bg), 0.95); backdrop-filter: blur(20px);
           border:1px solid rgba(var(--c-text),0.3); box-shadow:0 25px 50px rgba(0,0,0,0.35);
           border-radius:.9rem; padding:1rem 1.1rem; color: rgb(var(--c-text));
@@ -2239,8 +2320,9 @@ function BibleReaderPage() {
           padding:.45rem .55rem;
         }
         .selection-menu {
-          position: fixed; z-index: 110; transform: translateX(-50%);
-          display:flex; align-items:center; gap:.6rem;
+          position: fixed; z-index: 165; transform: translateX(-50%);
+          display:flex; align-items:center; justify-content:center; flex-wrap:wrap; gap:.6rem;
+          max-width: calc(100vw - 1.5rem);
           background: rgba(var(--c-bg), 0.95); backdrop-filter: blur(20px);
           border:1px solid rgba(var(--c-text),0.2); padding:.6rem .7rem; border-radius:.7rem;
           box-shadow:0 25px 50px rgba(0,0,0,0.3);
@@ -2264,7 +2346,7 @@ function BibleReaderPage() {
           bottom: 1.5rem;
           transform: translateX(-50%);
           width: min(92vw, 56rem);
-          z-index: 95;
+          z-index: 150;
           display: grid;
           gap: .85rem;
           padding: 1rem 1.1rem;
@@ -2511,13 +2593,26 @@ function BibleReaderPage() {
         }
         @media (max-width: 900px) {
           .reader-top-nav { padding: .75rem 1rem; }
-          .reader-main-shell { padding: 9rem 1rem 4rem; }
-          .reader-theme-ui { right: 1rem; bottom: 1rem; }
+          .reader-main-shell { padding: 9rem 1rem 13rem; }
+          .reader-theme-ui {
+            right: 1rem;
+            bottom: calc(5.25rem + env(safe-area-inset-bottom));
+            align-items: flex-end;
+          }
+          .reader-theme-panel {
+            max-width: calc(100vw - 2rem);
+            border-radius: 1rem;
+          }
           .reader-book-title { font-size: 3.1rem; }
           .verse-paragraph { font-size: calc(var(--user-font-size, 1.5rem) * .88); }
           .reader-card, .module-shell { padding: 1.1rem; }
           .selection-menu { gap:.45rem; }
-          .verse-action-bar { bottom: 1rem; width: min(94vw, 56rem); }
+          .verse-action-bar {
+            bottom: calc(13.5rem + env(safe-area-inset-bottom));
+            width: calc(100vw - 1.5rem);
+            max-height: calc(100vh - 15rem);
+            overflow-y: auto;
+          }
           .verse-image-panel {
             width: min(96vw, 42rem);
             max-height: min(94vh, 62rem);
@@ -2707,17 +2802,23 @@ function BibleReaderPage() {
                       }}
                       style={highlightColor ? { '--highlight-color': highlightColor } : undefined}
                       onClick={(event) => {
+                        event.stopPropagation()
+                        const selection = window.getSelection()
+                        if (selection && !selection.isCollapsed) {
+                          return
+                        }
                         handleVerseSelect(verse.number, event.shiftKey)
                         setSelectedWordKey(clean)
                         setTab('analysis')
                       }}
                       onMouseEnter={(event) => {
-                        if (!entry) return
+                        if (!entry || !supportsHoverTooltips()) return
                         const rect = event.currentTarget.getBoundingClientRect()
+                        const position = getTooltipPosition(rect)
                         setTooltip({
                           entry,
-                          left: Math.min(rect.left, window.innerWidth - 360),
-                          top: rect.bottom + 10,
+                          left: position.left,
+                          top: position.top,
                         })
                       }}
                       onMouseLeave={() => setTooltip(null)}
