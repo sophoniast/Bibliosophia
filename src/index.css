@@ -1695,11 +1695,11 @@ button {
 @media (max-width: 720px) {
   .app-menu {
     top: auto;
-    right: 0.85rem;
+    right: auto;
     bottom: max(0.85rem, env(safe-area-inset-bottom));
     left: 0.85rem;
     align-items: flex-end;
-    justify-content: flex-end;
+    justify-content: flex-start;
   }
 
   .app-menu-trigger {
@@ -1710,11 +1710,12 @@ button {
 
   .app-menu-panel {
     position: absolute;
-    right: 0;
+    right: auto;
     bottom: calc(100% + 0.65rem);
     left: 0;
+    width: min(22rem, calc(100vw - 1.7rem));
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: 1fr;
     gap: 0.55rem;
     max-width: none;
     max-height: min(70vh, 25rem);
@@ -1755,11 +1756,13 @@ button {
 
   .theme-dock {
     right: 0.85rem;
-    bottom: 0.85rem;
+    bottom: max(0.85rem, env(safe-area-inset-bottom));
+    max-width: calc(100vw - 8rem);
   }
 
   .theme-dock-panel {
     padding: 0.65rem;
+    max-width: calc(100vw - 8rem);
   }
 
   .map-page,
