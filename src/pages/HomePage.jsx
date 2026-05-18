@@ -51,6 +51,7 @@ function HomePage({ initialModule = null }) {
   const activeModuleRef = useRef(null)
   const isWarpedRef = useRef(false)
   const isLiteSceneRef = useRef(false)
+  const isThemePanelOpenRef = useRef(false)
   const lastLiteFrameTimeRef = useRef(0)
   const rafRef = useRef(0)
 
@@ -65,6 +66,10 @@ function HomePage({ initialModule = null }) {
     const dayOfYear = Math.floor((new Date() - new Date(new Date().getFullYear(), 0, 0)) / 86400000)
     return DAILY_VERSES[dayOfYear % DAILY_VERSES.length]
   }, [])
+
+  useEffect(() => {
+    isThemePanelOpenRef.current = isThemePanelOpen
+  }, [isThemePanelOpen])
 
   useEffect(() => {
     const handleOutsideClick = (event) => {
@@ -164,7 +169,7 @@ function HomePage({ initialModule = null }) {
     MENU_CONFIG.forEach((config, index) => {
       const mobilePosition = MOBILE_MENU_POSITIONS[index] || { x: 0, y: 0 }
       const wrapper = document.createElement('div')
-      wrapper.className = `glyph-wrapper is-menu${isLiteScene ? ' active' : ''}`
+      wrapper.className = 'glyph-wrapper is-menu'
 
       const inner = document.createElement('div')
       inner.className = 'glyph-inner menu-inner'
@@ -189,7 +194,7 @@ function HomePage({ initialModule = null }) {
         menu: isLiteScene ? { ...config, ...mobilePosition } : config,
         baseX: 0,
         baseY: 0,
-        baseZ: isLiteScene ? 150 : -3000,
+        baseZ: isLiteScene ? -1400 : -3000,
         rx: Math.random() * 360,
         ry: Math.random() * 360,
         rz: Math.random() * 360,
@@ -275,7 +280,7 @@ function HomePage({ initialModule = null }) {
         galaxyTimeRef.current += isLiteScene ? 0.002 : 0.005
 
         const maxScroll = Math.max(1, document.documentElement.scrollHeight - window.innerHeight)
-        const scrollPercent = isLiteScene ? 0.56 : scrollYRef.current / maxScroll
+        const scrollPercent = Math.min(1, Math.max(0, scrollYRef.current / maxScroll))
 
         ringDataRef.current.forEach((ring) => {
           const zMove = scrollPercent * (isLiteScene ? 900 : 7000)
@@ -303,7 +308,7 @@ function HomePage({ initialModule = null }) {
             node.ry += 0.005 * node.speed * 20 * spinSpeed
             node.rz += 0.005 * node.speed * 10 * spinSpeed
 
-            const flightZ = node.baseZ + scrollPercent * (isLiteScene ? 0 : 8000)
+            const flightZ = node.baseZ + scrollPercent * (isLiteScene ? 3600 : 8000)
             const targetX = lerp(0, node.menu.x, easeOut)
             const targetY = lerp(0, node.menu.y, easeOut)
             const targetZ = lerp(flightZ, 150, easeOut)
@@ -316,9 +321,7 @@ function HomePage({ initialModule = null }) {
             const finalRY = lerp(node.ry, dockRY, easeOut)
             const finalRZ = lerp(node.rz, dockRZ, easeOut)
 
-            if (isLiteScene) {
-              node.el.classList.add('active')
-            } else if (scrollPercent > mStart) {
+            if (scrollPercent > mStart) {
               const t = Math.min(1, (scrollPercent - mStart) / (mEnd - mStart))
               if (t > 0.95) node.el.classList.add('active')
               else node.el.classList.remove('active')
@@ -352,11 +355,11 @@ function HomePage({ initialModule = null }) {
 
         const heroOpacity = Math.max(0, 1 - scrollPercent * 6)
         if (titleRef.current?.parentElement) {
-          titleRef.current.parentElement.style.opacity = isLiteScene ? 1 : heroOpacity
+          titleRef.current.parentElement.style.opacity = heroOpacity
         }
 
         if (dailyCardRef.current) {
-          if (isLiteScene || scrollPercent > 0.6) dailyCardRef.current.classList.add('visible')
+          if (!isThemePanelOpenRef.current && scrollPercent > 0.68) dailyCardRef.current.classList.add('visible')
           else dailyCardRef.current.classList.remove('visible')
         }
       }
@@ -458,7 +461,7 @@ function HomePage({ initialModule = null }) {
           position: fixed;
           right: 2rem;
           bottom: 2rem;
-          z-index: 9999;
+          z-index: 10020;
           display: flex;
           flex-direction: column-reverse;
           align-items: center;
@@ -544,12 +547,15 @@ function HomePage({ initialModule = null }) {
           height: 100svh;
           perspective: 2000px;
           z-index: 10;
+          pointer-events: none;
+          touch-action: pan-y;
         }
         .galaxy-scene {
           position: relative;
           transform-style: preserve-3d;
           width: 100%;
           height: 100%;
+          pointer-events: none;
         }
         #hero {
           position: absolute;
@@ -1016,17 +1022,17 @@ function HomePage({ initialModule = null }) {
             animation-duration: 34s;
           }
           #scroll-engine {
-            height: 0;
+            height: 230svh;
           }
           #viewport {
-            position: relative;
-            min-height: 660px;
+            position: fixed;
+            inset: 0;
             height: 100svh;
             perspective: 1200px;
           }
           #hero {
-            justify-content: flex-start;
-            padding: 4.75rem 1.25rem 0;
+            justify-content: center;
+            padding: 0 1.25rem;
           }
           #title {
             font-size: clamp(3rem, 16vw, 4.4rem);
@@ -1039,36 +1045,29 @@ function HomePage({ initialModule = null }) {
             letter-spacing: 0.32em;
           }
           #hint {
-            margin-top: 1.2rem;
+            margin-top: 2rem;
           }
           .hint-line {
-            display: none;
+            height: 3rem;
           }
           .hint-text {
             max-width: 16rem;
             letter-spacing: 0.2em;
-          }
-          .hint-text::before {
-            content: 'Tap a section';
-          }
-          .hint-text {
-            font-size: 0;
-          }
-          .hint-text::before {
             font-size: 10px;
           }
           #daily-verse-card {
-            position: relative;
-            top: auto;
-            left: auto;
-            transform: none;
+            position: fixed;
+            top: 12%;
+            left: 50%;
+            transform: translateX(-50%) translateY(20px);
             width: calc(100% - 2rem);
-            margin: 1rem auto 6rem;
+            max-height: min(64svh, 34rem);
+            overflow-y: auto;
             padding: 1.25rem;
             border-radius: 0.75rem;
           }
           #daily-verse-card.visible {
-            transform: none;
+            transform: translateX(-50%) translateY(0);
           }
           .verse-text { font-size: 1.18rem; }
           .verse-insight { font-size: 12px; }
@@ -1109,7 +1108,14 @@ function HomePage({ initialModule = null }) {
           .read-header { padding: 0 1.5rem; }
           .module-center { padding: 1rem; }
           .module-shell { padding: 2rem 1.5rem; }
-          #theme-ui-wrapper { right: 1rem; bottom: 1rem; }
+          #theme-ui-wrapper {
+            right: 1rem;
+            bottom: max(1rem, env(safe-area-inset-bottom));
+          }
+          #theme-panel {
+            max-height: min(62svh, 24rem);
+            background: rgba(var(--c-bg), 0.94);
+          }
         }
       `}</style>
 
