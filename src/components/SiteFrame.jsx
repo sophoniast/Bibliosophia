@@ -1,19 +1,15 @@
-import { BookOpenText, Compass, Home, LogOut, UserPlus } from 'lucide-react'
-import { useState } from 'react'
+import { Archive, BookOpenText, Compass, Home, PenLine } from 'lucide-react'
 import { NavLink } from 'react-router-dom'
-import { useAuth } from '../context/AuthContext'
-import AuthDialog from './AuthDialog'
 
 const navItems = [
   { to: '/', label: 'Hub', icon: Home },
-  { to: '/map', label: 'Map Reader', icon: Compass },
-  { to: '/reader', label: 'Bible Reader', icon: BookOpenText },
+  { to: '/reader', label: 'Read', icon: BookOpenText },
+  { to: '/map', label: 'Map', icon: Compass },
+  { to: '/scribe', label: 'Scribe', icon: PenLine },
+  { to: '/archive', label: 'Archive', icon: Archive },
 ]
 
 function SiteFrame({ children, eyebrow, title }) {
-  const { isSignedUp, signOut, user } = useAuth()
-  const [isAuthDialogOpen, setIsAuthDialogOpen] = useState(false)
-
   return (
     <div className="page-shell">
       <header className="site-header glass-panel">
@@ -34,23 +30,9 @@ function SiteFrame({ children, eyebrow, title }) {
               </span>
             </NavLink>
           ))}
-          {isSignedUp ? (
-            <button className="nav-pill nav-auth-button" onClick={signOut} title={user?.email || 'Sign out'} type="button">
-              <LogOut size={16} />
-              Sign Out
-            </button>
-          ) : (
-            <button className="nav-pill nav-auth-button" onClick={() => setIsAuthDialogOpen(true)} type="button">
-              <UserPlus size={16} />
-              Sign Up
-            </button>
-          )}
         </nav>
       </header>
       {children}
-      {isAuthDialogOpen ? (
-        <AuthDialog featureName="study tools" onClose={() => setIsAuthDialogOpen(false)} />
-      ) : null}
     </div>
   )
 }

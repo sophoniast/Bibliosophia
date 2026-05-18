@@ -4,7 +4,6 @@ import { DEFAULT_TRANSLATION, FREE_BIBLE_TRANSLATIONS } from '../data/bibleCatal
 import { askReader, getPreferences, getReading, getReadings, getReaderState, savePreferences, saveReaderState, searchVerseImageLibrary, getVerseImageSources } from '../lib/api'
 import { hasSupabaseEnv } from '../lib/supabase'
 import { useTheme } from '../context/ThemeContext'
-import AuthDialog from '../components/AuthDialog'
 
 function cleanWord(token) {
   return token.toLowerCase().replace(/[^a-z']/g, '')
@@ -657,7 +656,6 @@ const WORD_STUDY_LIBRARY = buildWordStudyLibrary(READINGS)
 
 function BibleReaderPage() {
   const { mode, themeName, themes, toggleMode, setThemeName } = useTheme()
-  const studyToolsUnlocked = true
 
   const readingColumnRef = useRef(null)
   const notesTimerRef = useRef(null)
@@ -682,7 +680,6 @@ function BibleReaderPage() {
   const [tooltip, setTooltip] = useState(null)
   const [selectionMenu, setSelectionMenu] = useState({ open: false, x: 0, y: 0, text: '', tokenIds: [] })
   const [isThemePanelOpen, setIsThemePanelOpen] = useState(false)
-  const [authDialogFeature, setAuthDialogFeature] = useState('')
   const [selectedVerseNumbers, setSelectedVerseNumbers] = useState([])
   const [imageModalOpen, setImageModalOpen] = useState(false)
   const [verseImageTheme, setVerseImageTheme] = useState('current')
@@ -903,7 +900,6 @@ function BibleReaderPage() {
     (selectedWordKey ? enrichLexiconEntry(selectedWordKey, WORD_STUDY_LIBRARY[selectedWordKey]) : null) ||
     readingWordEntries.find((item) => item.key === selectedWordKey)?.entry ||
     readingWordEntries[0]?.entry
-  const openSignupForStudyTools = () => setAuthDialogFeature('Dictionary, Concordance, and Commentaries')
   const selectedVerses = useMemo(
     () => reading?.verses.filter((verse) => selectedVerseNumbers.includes(verse.number)) || [],
     [reading, selectedVerseNumbers],
@@ -2703,7 +2699,7 @@ function BibleReaderPage() {
 
                   return (
                     <span
-                      className={`text-token ${studyToolsUnlocked ? 'lexicon-word' : 'lexicon-word locked'} ${highlightColor ? 'eink-marker' : ''}`}
+                      className={`text-token lexicon-word ${highlightColor ? 'eink-marker' : ''}`}
                       data-word={clean}
                       key={tokenId}
                       ref={(node) => {
@@ -2712,15 +2708,11 @@ function BibleReaderPage() {
                       style={highlightColor ? { '--highlight-color': highlightColor } : undefined}
                       onClick={(event) => {
                         handleVerseSelect(verse.number, event.shiftKey)
-                        if (!studyToolsUnlocked) {
-                          openSignupForStudyTools()
-                          return
-                        }
                         setSelectedWordKey(clean)
                         setTab('analysis')
                       }}
                       onMouseEnter={(event) => {
-                        if (!studyToolsUnlocked || !entry) return
+                        if (!entry) return
                         const rect = event.currentTarget.getBoundingClientRect()
                         setTooltip({
                           entry,
@@ -2742,13 +2734,12 @@ function BibleReaderPage() {
             <div className="reader-card study-tools-card">
               <div className="reader-section-head">
                 <div>
-                  <p className="reader-section-kicker">Signed-up Study Tools</p>
+                  <p className="reader-section-kicker">Study Tools</p>
                   <h3>Dictionary & Concordance</h3>
                 </div>
-                <span className="reader-section-badge">{studyToolsUnlocked ? 'Unlocked' : 'Locked'}</span>
+                <span className="reader-section-badge">Open</span>
               </div>
-              {studyToolsUnlocked ? (
-                <div className="lexicon-block">
+              <div className="lexicon-block">
                   {selectedEntry ? (
                     <>
                       <div className="lexicon-feature">
@@ -2798,17 +2789,9 @@ function BibleReaderPage() {
                     </>
                   ) : null}
                 </div>
-              ) : (
-                <div className="reader-lock-panel">
-                  <strong>Unlock word study</strong>
-                  <p>Sign up to use the Dictionary, Biblical Dictionary, and Concordance tools.</p>
-                  <button className="save-btn" onClick={openSignupForStudyTools} type="button">Sign Up</button>
-                </div>
-              )}
             </div>
 
-            {studyToolsUnlocked ? (
-              <div className="reader-card commentary-card">
+            <div className="reader-card commentary-card">
                 <div className="reader-section-head compact">
                   <div>
                     <p className="reader-section-kicker">Passage Notes</p>
@@ -2824,19 +2807,6 @@ function BibleReaderPage() {
                   ))}
                 </ul>
               </div>
-            ) : (
-              <div className="reader-card commentary-card reader-lock-panel">
-                <div className="reader-section-head compact">
-                  <div>
-                    <p className="reader-section-kicker">Passage Notes</p>
-                    <h3>Commentaries</h3>
-                  </div>
-                  <span className="reader-section-badge">Locked</span>
-                </div>
-                <p>Sign up to unlock passage commentaries and canonical cross-reference notes.</p>
-                <button className="save-btn" onClick={openSignupForStudyTools} type="button">Sign Up</button>
-              </div>
-            )}
 
             <div className="reader-card studio-card">
               <div className="studio-header">
@@ -2848,7 +2818,7 @@ function BibleReaderPage() {
                 </div>
                 <div className="profile-pill">
                   <div className="profile-dot">S</div>
-                  <span className="profile-label">Profile</span>
+                  <span className="profile-label">Local</span>
                 </div>
               </div>
 
@@ -2913,12 +2883,7 @@ function BibleReaderPage() {
 
                 {tab === 'analysis' ? (
                   <div className="analysis-area">
-                    {!studyToolsUnlocked ? (
-                      <div className="analysis-placeholder">
-                        <p>Sign up to unlock Word Analysis, Dictionary data, Concordance references, and Commentaries.</p>
-                        <button className="save-btn" onClick={openSignupForStudyTools} type="button">Sign Up</button>
-                      </div>
-                    ) : selectedEntry ? (
+                    {selectedEntry ? (
                       <div className="analysis-content hide-scrollbars">
                         <div>
                           <div className="analysis-header">
@@ -3287,9 +3252,6 @@ function BibleReaderPage() {
           ×
         </button>
       </div>
-      {authDialogFeature ? (
-        <AuthDialog featureName={authDialogFeature} onClose={() => setAuthDialogFeature('')} />
-      ) : null}
     </div>
   )
 }
