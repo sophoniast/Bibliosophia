@@ -10,6 +10,8 @@ const DEFAULT_PREFERENCES = {
   themeName: 'abbey',
 }
 
+const PREFERENCES_STORAGE_KEY = 'bibliosophia.preferences'
+
 function fallbackAnswer(question, readingTitle, selectedEntry) {
   const selectedWordLine = selectedEntry
     ? `The selected word is ${selectedEntry.lemma} (${selectedEntry.translit}, ${selectedEntry.strongs}), which in this passage emphasizes ${String(selectedEntry.def).toLowerCase()}.`
@@ -84,52 +86,25 @@ export async function getJourneys() {
 }
 
 export async function getPreferences() {
-  if (!hasSupabaseEnv) return DEFAULT_PREFERENCES
-
-  const userId = await ensureProfile()
-  const { data, error } = await supabase
-    .from('user_profiles')
-    .select('theme_name, mode, font_scale, line_height')
-    .eq('id', userId)
-    .maybeSingle()
-
-  if (error) throw error
-  if (!data) return DEFAULT_PREFERENCES
-
-  return {
-    fontScale: Number(data.font_scale),
-    lineHeight: Number(data.line_height),
-    mode: data.mode,
-    themeName: data.theme_name,
-  }
+  return readLocalPreferences()
 }
 
 export async function savePreferences(payload) {
-  if (!hasSupabaseEnv) return { ...DEFAULT_PREFERENCES, ...payload }
-
-  const userId = await ensureProfile()
-  const record = {
-    font_scale: Number(payload.fontScale ?? DEFAULT_PREFERENCES.fontScale),
-    id: userId,
-    line_height: Number(payload.lineHeight ?? DEFAULT_PREFERENCES.lineHeight),
-    mode: payload.mode ?? DEFAULT_PREFERENCES.mode,
-    theme_name: payload.themeName ?? DEFAULT_PREFERENCES.themeName,
+  const preferences = {
+    ...DEFAULT_PREFERENCES,
+    ...readLocalPreferences(),
+    ...payload,
+    fontScale: Number(payload.fontScale ?? readLocalPreferences().fontScale),
+    lineHeight: Number(payload.lineHeight ?? readLocalPreferences().lineHeight),
   }
 
-  const { data, error } = await supabase
-    .from('user_profiles')
-    .upsert(record)
-    .select('theme_name, mode, font_scale, line_height')
-    .single()
-
-  if (error) throw error
-
-  return {
-    fontScale: Number(data.font_scale),
-    lineHeight: Number(data.line_height),
-    mode: data.mode,
-    themeName: data.theme_name,
+  try {
+    window.localStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify(preferences))
+  } catch {
+    // Preference persistence is a convenience only.
   }
+
+  return preferences
 }
 
 export async function getReadings() {
@@ -235,7 +210,7 @@ export async function getReaderState(readingKey) {
     }
   }
 
-  const userId = await ensureProfile()
+  const userId = await ensureUserId()
   const { data, error } = await supabase
     .from('reader_states')
     .select('notes, highlights, reading_key')
@@ -268,7 +243,7 @@ export async function saveReaderState(readingKey, payload) {
     }
   }
 
-  const userId = await ensureProfile()
+  const userId = await ensureUserId()
   const { data, error } = await supabase
     .from('reader_states')
     .upsert({
@@ -363,16 +338,27 @@ export async function getVerseImageSources() {
   return data
 }
 
-async function ensureProfile() {
+function readLocalPreferences() {
+  try {
+    const raw = window.localStorage.getItem(PREFERENCES_STORAGE_KEY)
+    if (!raw) return DEFAULT_PREFERENCES
+    const parsed = JSON.parse(raw)
+
+    return {
+      fontScale: Number(parsed.fontScale ?? DEFAULT_PREFERENCES.fontScale),
+      lineHeight: Number(parsed.lineHeight ?? DEFAULT_PREFERENCES.lineHeight),
+      mode: parsed.mode ?? DEFAULT_PREFERENCES.mode,
+      themeName: parsed.themeName ?? DEFAULT_PREFERENCES.themeName,
+    }
+  } catch {
+    return DEFAULT_PREFERENCES
+  }
+}
+
+async function ensureUserId() {
   const session = await ensureSupabaseSession()
   const userId = session?.user?.id
   if (!userId) throw new Error('Could not establish a Supabase session.')
-
-  const { error } = await supabase.from('user_profiles').upsert({
-    id: userId,
-  })
-
-  if (error) throw error
   return userId
 }
 

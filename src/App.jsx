@@ -3,8 +3,6 @@ import { Archive, BookOpenText, Compass, Home, Menu, PenLine, X } from 'lucide-r
 import { BrowserRouter, NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { ThemeProvider } from './context/ThemeContext'
 import { AuthProvider } from './context/AuthContext'
-import AuthDialog from './components/AuthDialog'
-import AuthGate from './components/AuthGate'
 import ThemeDock from './components/ThemeDock'
 
 const HomePage = lazy(() => import('./pages/HomePage'))
@@ -73,8 +71,6 @@ function AmbientBackdrop() {
 }
 
 function App() {
-  const [authDialogFeature, setAuthDialogFeature] = useState('')
-
   return (
     <AuthProvider>
       <ThemeProvider>
@@ -87,21 +83,11 @@ function App() {
               <Route path="/" element={<HomePage />} />
               <Route path="/scribe" element={<HomePage initialModule="mod-scribe" />} />
               <Route path="/archive" element={<HomePage initialModule="mod-data" />} />
-              <Route
-                path="/map"
-                element={(
-                  <AuthGate featureName="Maps" onOpenAuth={() => setAuthDialogFeature('Maps')}>
-                    <MapReaderPage />
-                  </AuthGate>
-                )}
-              />
+              <Route path="/map" element={<MapReaderPage />} />
               <Route path="/reader" element={<BibleReaderPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </Suspense>
-          {authDialogFeature ? (
-            <AuthDialog featureName={authDialogFeature} onClose={() => setAuthDialogFeature('')} />
-          ) : null}
         </BrowserRouter>
       </ThemeProvider>
     </AuthProvider>

@@ -95,7 +95,7 @@ export const FREE_BIBLE_TRANSLATIONS = [
   { id: 'synodal', label: 'Russian Synodal Translation', language: 'Russian', license: 'Public Domain' },
 ]
 
-export const DEFAULT_TRANSLATION = 'web'
+export const DEFAULT_TRANSLATION = 'kjv'
 
 export function getCanonicalBook(bookName) {
   return CANONICAL_BOOKS.find((item) => item.book === bookName) || CANONICAL_BOOKS[0]
