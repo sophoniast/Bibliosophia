@@ -11,6 +11,7 @@ const DEFAULT_PREFERENCES = {
 }
 
 const PREFERENCES_STORAGE_KEY = 'bibliosophia.preferences'
+const READER_STATE_STORAGE_PREFIX = 'bibliosophia.readerState.'
 
 function fallbackAnswer(question, readingTitle, selectedEntry) {
   const selectedWordLine = selectedEntry
@@ -76,13 +77,28 @@ export async function getHomeData() {
 export async function getJourneys() {
   if (!hasSupabaseEnv) return JOURNEYS
 
-  const { data, error } = await supabase
-    .from('app_journeys')
-    .select('payload')
-    .order('sort_order', { ascending: true })
+  try {
+    const { data, error } = await supabase
+      .from('app_journeys')
+      .select('payload')
+      .order('sort_order', { ascending: true })
 
-  if (error) throw error
-  return data.map((row) => row.payload)
+    if (error) throw error
+
+    const journeys = data
+      .map((row) => row.payload)
+      .filter((journey) => (
+        journey &&
+        Array.isArray(journey.path) &&
+        Array.isArray(journey.points) &&
+        journey.path.length > 0 &&
+        journey.points.length > 0
+      ))
+
+    return journeys.length ? journeys : JOURNEYS
+  } catch {
+    return JOURNEYS
+  }
 }
 
 export async function getPreferences() {
@@ -202,68 +218,23 @@ export async function getReading(book, chapter = 1, translation = DEFAULT_TRANSL
 }
 
 export async function getReaderState(readingKey) {
-  if (!hasSupabaseEnv) {
-    return {
-      highlights: {},
-      notes: '',
-      readingKey,
-    }
-  }
-
-  const userId = await ensureUserId()
-  const { data, error } = await supabase
-    .from('reader_states')
-    .select('notes, highlights, reading_key')
-    .eq('user_id', userId)
-    .eq('reading_key', readingKey)
-    .maybeSingle()
-
-  if (error) throw error
-  if (!data) {
-    return {
-      highlights: {},
-      notes: '',
-      readingKey,
-    }
-  }
-
-  return {
-    highlights: data.highlights || {},
-    notes: data.notes || '',
-    readingKey: data.reading_key,
-  }
+  return readLocalReaderState(readingKey)
 }
 
 export async function saveReaderState(readingKey, payload) {
-  if (!hasSupabaseEnv) {
-    return {
-      highlights: payload.highlights || {},
-      notes: payload.notes || '',
-      readingKey,
-    }
+  const state = {
+    highlights: payload.highlights || {},
+    notes: payload.notes || '',
+    readingKey,
   }
 
-  const userId = await ensureUserId()
-  const { data, error } = await supabase
-    .from('reader_states')
-    .upsert({
-      highlights: payload.highlights || {},
-      notes: payload.notes || '',
-      reading_key: readingKey,
-      user_id: userId,
-    }, {
-      onConflict: 'user_id,reading_key',
-    })
-    .select('notes, highlights, reading_key')
-    .single()
-
-  if (error) throw error
-
-  return {
-    highlights: data.highlights || {},
-    notes: data.notes || '',
-    readingKey: data.reading_key,
+  try {
+    window.localStorage.setItem(`${READER_STATE_STORAGE_PREFIX}${readingKey}`, JSON.stringify(state))
+  } catch {
+    // Local note persistence is best-effort and should never block reading.
   }
+
+  return state
 }
 
 export async function askReader(payload) {
@@ -355,11 +326,30 @@ function readLocalPreferences() {
   }
 }
 
-async function ensureUserId() {
-  const session = await ensureSupabaseSession()
-  const userId = session?.user?.id
-  if (!userId) throw new Error('Could not establish a Supabase session.')
-  return userId
+function readLocalReaderState(readingKey) {
+  try {
+    const raw = window.localStorage.getItem(`${READER_STATE_STORAGE_PREFIX}${readingKey}`)
+    if (!raw) {
+      return {
+        highlights: {},
+        notes: '',
+        readingKey,
+      }
+    }
+
+    const parsed = JSON.parse(raw)
+    return {
+      highlights: parsed.highlights || {},
+      notes: parsed.notes || '',
+      readingKey,
+    }
+  } catch {
+    return {
+      highlights: {},
+      notes: '',
+      readingKey,
+    }
+  }
 }
 
 function getDayOfYearIndex() {

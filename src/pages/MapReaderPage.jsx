@@ -81,7 +81,7 @@ function MapReaderPage() {
   const currentPoint = activeJourney?.points[selectedWaypoint] || activeJourney?.points[0]
 
   useEffect(() => {
-    if (mapRef.current || !mapContainerRef.current) return undefined
+    if (mapRef.current || !mapContainerRef.current || !activeJourney) return undefined
 
     const map = L.map(mapContainerRef.current, {
       zoomControl: false,
@@ -89,13 +89,18 @@ function MapReaderPage() {
       scrollWheelZoom: true,
     }).setView([31.7683, 35.2137], 6)
 
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 18,
+    }).addTo(map)
+
     mapRef.current = map
+    window.requestAnimationFrame(() => map.invalidateSize())
 
     return () => {
       map.remove()
       mapRef.current = null
     }
-  }, [])
+  }, [activeJourney])
 
   useEffect(() => {
     const map = mapRef.current
@@ -111,7 +116,8 @@ function MapReaderPage() {
 
     clearLayers()
 
-    activeJourney.civilizations.forEach((civilization) => {
+    ;(activeJourney.civilizations || []).forEach((civilization) => {
+      if (!Array.isArray(civilization.bounds) || civilization.bounds.length < 3) return
       const polygon = L.polygon(civilization.bounds, {
         color: civilization.color,
         fillColor: civilization.color,
@@ -139,6 +145,7 @@ function MapReaderPage() {
     }).addTo(map)
 
     activeJourney.points.forEach((point, index) => {
+      if (!Number.isFinite(point.lat) || !Number.isFinite(point.lon)) return
       const marker = L.marker([point.lat, point.lon], {
         icon: L.divIcon({
           className: '',
@@ -155,8 +162,14 @@ function MapReaderPage() {
       layersRef.current.markers.push(marker)
     })
 
-    const bounds = L.latLngBounds(activeJourney.path.map(([lat, lon]) => [lat, lon]))
-    map.fitBounds(bounds.pad(0.32))
+    const pathPoints = activeJourney.path.filter(([lat, lon]) => Number.isFinite(lat) && Number.isFinite(lon))
+    if (pathPoints.length) {
+      const bounds = L.latLngBounds(pathPoints.map(([lat, lon]) => [lat, lon]))
+      window.requestAnimationFrame(() => {
+        map.invalidateSize()
+        map.fitBounds(bounds.pad(0.32))
+      })
+    }
   }, [activeJourney, selectedWaypoint])
 
   const handleZoomIn = () => mapRef.current?.zoomIn()

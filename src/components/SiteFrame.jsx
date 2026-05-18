@@ -1,4 +1,4 @@
-import { Archive, BookOpenText, Compass, Home, PenLine } from 'lucide-react'
+import { BookOpenText, Compass, Home, PenLine } from 'lucide-react'
 import { NavLink } from 'react-router-dom'
 
 const navItems = [
@@ -6,7 +6,6 @@ const navItems = [
   { to: '/reader', label: 'Read', icon: BookOpenText },
   { to: '/map', label: 'Map', icon: Compass },
   { to: '/scribe', label: 'Scribe', icon: PenLine },
-  { to: '/archive', label: 'Archive', icon: Archive },
 ]
 
 function SiteFrame({ children, eyebrow, title }) {

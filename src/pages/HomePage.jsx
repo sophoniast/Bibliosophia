@@ -24,16 +24,14 @@ const DAILY_VERSES = [
 
 const MENU_CONFIG = [
   { id: 'READ', glyph: 'א', desc: 'Canonical Texts', x: -350, y: 150, mod: 'mod-read' },
-  { id: 'MAPS', glyph: 'Δ', desc: 'Cartography', x: -116, y: 150, mod: 'mod-maps' },
-  { id: 'SCRIBE', glyph: 'Φ', desc: 'AI Exegesis', x: 116, y: 150, mod: 'mod-scribe' },
-  { id: 'DATA', glyph: 'Ω', desc: 'User Archives', x: 350, y: 150, mod: 'mod-data' },
+  { id: 'MAPS', glyph: 'Δ', desc: 'Cartography', x: 0, y: 150, mod: 'mod-maps' },
+  { id: 'SCRIBE', glyph: 'Φ', desc: 'AI Exegesis', x: 350, y: 150, mod: 'mod-scribe' },
 ]
 
 const MOBILE_MENU_POSITIONS = [
-  { x: -92, y: 104 },
-  { x: 92, y: 104 },
-  { x: -92, y: 274 },
-  { x: 92, y: 274 },
+  { x: -92, y: 130 },
+  { x: 92, y: 130 },
+  { x: 0, y: 292 },
 ]
 
 function HomePage({ initialModule = null }) {
@@ -403,7 +401,7 @@ function HomePage({ initialModule = null }) {
       })
       setAiOutput(result.answer.replace(/\n/g, '<br/>'))
     } catch {
-      setAiOutput('Error: Connection lost. The archives are currently unreachable.')
+      setAiOutput('Error: Connection lost. The study assistant is currently unreachable.')
     }
   }
 
@@ -1245,15 +1243,6 @@ function HomePage({ initialModule = null }) {
         </div>
       </div>
 
-      <div className={`module-layer ${activeModule === 'mod-data' ? 'active' : ''}`} id="mod-data">
-        <div className="placeholder-module">
-          <div className="placeholder-card">
-            <button className="module-close" onClick={closeModule} type="button">×</button>
-            <h3>Ω User Archives</h3>
-            <p>The fourth module slot from the uploaded design is preserved so the hub composition matches the source layout more closely.</p>
-          </div>
-        </div>
-      </div>
     </div>
   )
 }

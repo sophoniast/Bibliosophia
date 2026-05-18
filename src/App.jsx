@@ -1,5 +1,5 @@
 import { Suspense, lazy, useState } from 'react'
-import { Archive, BookOpenText, Compass, Home, Menu, PenLine, X } from 'lucide-react'
+import { BookOpenText, Compass, Home, Menu, PenLine, X } from 'lucide-react'
 import { BrowserRouter, NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { ThemeProvider } from './context/ThemeContext'
 import { AuthProvider } from './context/AuthContext'
@@ -14,7 +14,6 @@ const appNavItems = [
   { to: '/reader', label: 'Read', shortLabel: 'Read', icon: BookOpenText },
   { to: '/map', label: 'Map', shortLabel: 'Map', icon: Compass },
   { to: '/scribe', label: 'Scribe', shortLabel: 'Scribe', icon: PenLine },
-  { to: '/archive', label: 'Archive', shortLabel: 'Archive', icon: Archive },
 ]
 
 function AppMenu() {
@@ -82,7 +81,6 @@ function App() {
             <Routes>
               <Route path="/" element={<HomePage />} />
               <Route path="/scribe" element={<HomePage initialModule="mod-scribe" />} />
-              <Route path="/archive" element={<HomePage initialModule="mod-data" />} />
               <Route path="/map" element={<MapReaderPage />} />
               <Route path="/reader" element={<BibleReaderPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />

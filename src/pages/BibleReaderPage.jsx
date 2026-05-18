@@ -1603,7 +1603,7 @@ function BibleReaderPage() {
       .catch(() => {
         setChatHistory((current) => [
           ...current,
-          { role: 'assistant', text: 'Error: Connection lost. The archives are currently unreachable.' },
+          { role: 'assistant', text: 'Error: Connection lost. The study assistant is currently unreachable.' },
         ])
       })
   }
