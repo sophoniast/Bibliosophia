@@ -1,0 +1,3313 @@
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
+import { READINGS } from '../data/readerContent'
+import { DEFAULT_TRANSLATION, FREE_BIBLE_TRANSLATIONS } from '../data/bibleCatalog'
+import { askReader, getPreferences, getReading, getReadings, getReaderState, savePreferences, saveReaderState, searchVerseImageLibrary, getVerseImageSources } from '../lib/api'
+import { hasSupabaseEnv } from '../lib/supabase'
+import { useTheme } from '../context/ThemeContext'
+import AuthDialog from '../components/AuthDialog'
+
+function cleanWord(token) {
+  return token.toLowerCase().replace(/[^a-z']/g, '')
+}
+
+function splitText(text) {
+  return text.split(/(\s+|[.,;:?!])/)
+}
+
+function buildStrokeSegments(distribution, totalCount, radius) {
+  const circumference = 2 * Math.PI * radius
+  let cumulative = 0
+
+  return distribution.map((item) => {
+    const fraction = totalCount === 0 ? 0 : item.value / totalCount
+    const strokeDasharray = `${fraction * circumference} ${circumference}`
+    const strokeDashoffset = -cumulative * circumference
+    cumulative += fraction
+    return { ...item, strokeDasharray, strokeDashoffset }
+  })
+}
+
+function hexToRgba(hex, alpha) {
+  const normalized = hex.replace('#', '')
+  const r = Number.parseInt(normalized.slice(0, 2), 16)
+  const g = Number.parseInt(normalized.slice(2, 4), 16)
+  const b = Number.parseInt(normalized.slice(4, 6), 16)
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
+function wrapCanvasText(context, text, maxWidth) {
+  const words = text.split(/\s+/)
+  const lines = []
+  let current = ''
+
+  words.forEach((word) => {
+    const candidate = current ? `${current} ${word}` : word
+    if (context.measureText(candidate).width <= maxWidth) {
+      current = candidate
+    } else {
+      if (current) lines.push(current)
+      current = word
+    }
+  })
+
+  if (current) lines.push(current)
+  return lines
+}
+
+function getDownloadFileName(label) {
+  return `${String(label || 'bibliosophia-verse')
+    .trim()
+    .replace(/[^a-z0-9]+/gi, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase() || 'bibliosophia-verse'}.png`
+}
+
+function getGlossaryLine(entry) {
+  if (!entry) return ''
+  const pieces = []
+
+  if (entry.lemma) pieces.push(`Lemma: ${entry.lemma}`)
+  if (entry.translit && entry.translit !== entry.lemma) pieces.push(`Transliteration: ${entry.translit}`)
+  if (entry.strongs) pieces.push(`Strong's: ${entry.strongs}`)
+  if (entry.freq) pieces.push(`Frequency: ${entry.freq}`)
+
+  return pieces.join(' · ')
+}
+
+function getOriginalLanguageRows(entry) {
+  if (!entry) return []
+
+  return [
+    { label: 'Root', value: entry.root },
+    { label: 'Greek', value: entry.greek, translit: entry.greekTranslit },
+    { label: 'Hebrew', value: entry.hebrew, translit: entry.hebrewTranslit },
+    { label: 'Aramaic', value: entry.aramaic, translit: entry.aramaicTranslit },
+  ].filter((row) => row.value)
+}
+
+function enrichLexiconEntry(word, entry = {}) {
+  const original = ORIGINAL_LANGUAGE_LIBRARY[word] || {}
+  const isGreek = String(entry.strongs || '').startsWith('G')
+  const isHebrew = String(entry.strongs || '').startsWith('H')
+
+  return {
+    ...entry,
+    root: entry.root || original.root || entry.translit || word,
+    greek: entry.greek || original.greek || (isGreek ? entry.lemma : ''),
+    greekTranslit: entry.greekTranslit || original.greekTranslit || (isGreek ? entry.translit : ''),
+    hebrew: entry.hebrew || original.hebrew || (isHebrew ? entry.lemma : ''),
+    hebrewTranslit: entry.hebrewTranslit || original.hebrewTranslit || (isHebrew ? entry.translit : ''),
+    aramaic: entry.aramaic || original.aramaic || '',
+    aramaicTranslit: entry.aramaicTranslit || original.aramaicTranslit || '',
+  }
+}
+
+async function writeClipboardText(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text)
+    return true
+  }
+
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', '')
+  textarea.style.position = 'fixed'
+  textarea.style.opacity = '0'
+  textarea.style.pointerEvents = 'none'
+  document.body.appendChild(textarea)
+  textarea.select()
+
+  try {
+    return document.execCommand('copy')
+  } finally {
+    textarea.remove()
+  }
+}
+
+async function loadImage(url) {
+  return new Promise((resolve, reject) => {
+    const image = new Image()
+    image.onload = () => resolve(image)
+    image.onerror = () => reject(new Error('Image load failed'))
+    image.src = url
+  })
+}
+
+async function canvasToPngBlob(canvas) {
+  return new Promise((resolve) => {
+    if (!canvas.toBlob) {
+      resolve(null)
+      return
+    }
+
+    canvas.toBlob((blob) => resolve(blob), 'image/png')
+  })
+}
+
+function sanitizeLoadedNotes(value) {
+  const text = String(value || '')
+  const normalized = text.toLowerCase()
+  const lines = text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+
+  const looksAutoGenerated =
+    normalized.includes('bibliosophia exegetical engine') ||
+    normalized.includes("strong's exhaustive") ||
+    lines.filter((line) => /^[1-3]?\s?[a-z]+\s+\d+:\d+/i.test(line)).length >= 3
+
+  return looksAutoGenerated ? '' : text
+}
+
+
+const TAB_OPTIONS = [
+  { id: 'notes', label: 'My Notes' },
+  { id: 'ai', label: 'AI Exegete' },
+  { id: 'analysis', label: 'Word Analysis' },
+]
+
+const HIGHLIGHT_OPTIONS = [
+  { id: 'theme', color: 'rgba(var(--c-accent), 0.4)' },
+  { id: 'blue', color: 'rgba(59, 130, 246, 0.4)' },
+  { id: 'green', color: 'rgba(16, 185, 129, 0.4)' },
+  { id: 'red', color: 'rgba(244, 63, 94, 0.4)' },
+]
+
+const VERSE_IMAGE_FONTS = [
+  {
+    id: 'goudy',
+    label: 'Goudy',
+    previewFamily: '"Goudy Bookletter 1911", serif',
+    canvasFamily: '"Goudy Bookletter 1911"',
+    brandFamily: 'Spectral',
+  },
+  {
+    id: 'literata',
+    label: 'Literata',
+    previewFamily: 'Literata, serif',
+    canvasFamily: 'Literata',
+    brandFamily: 'Spectral',
+  },
+  {
+    id: 'playfair',
+    label: 'Playfair',
+    previewFamily: '"Playfair Display", serif',
+    canvasFamily: '"Playfair Display"',
+    brandFamily: '"JetBrains Mono"',
+  },
+  {
+    id: 'merriweather',
+    label: 'Merriweather',
+    previewFamily: 'Merriweather, serif',
+    canvasFamily: 'Merriweather',
+    brandFamily: '"JetBrains Mono"',
+  },
+  {
+    id: 'spectral',
+    label: 'Spectral',
+    previewFamily: 'Spectral, serif',
+    canvasFamily: 'Spectral',
+    brandFamily: '"JetBrains Mono"',
+  },
+]
+
+const LOCAL_STUDIO_SOURCE = { id: 'studio', label: 'Studio', enabled: true }
+const DEFAULT_IMAGE_SEARCH_SOURCE = 'studio'
+
+function encodeSvgDataUri(svg) {
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
+}
+
+function createStudioBackground({ title, accent, base, glow, sky, queryTerms = [] }) {
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900">
+      <defs>
+        <linearGradient id="sky" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="${sky[0]}"/>
+          <stop offset="55%" stop-color="${sky[1]}"/>
+          <stop offset="100%" stop-color="${sky[2]}"/>
+        </linearGradient>
+        <radialGradient id="sun" cx="72%" cy="24%" r="34%">
+          <stop offset="0%" stop-color="${glow}" stop-opacity="0.95"/>
+          <stop offset="55%" stop-color="${glow}" stop-opacity="0.28"/>
+          <stop offset="100%" stop-color="${glow}" stop-opacity="0"/>
+        </radialGradient>
+      </defs>
+      <rect width="1600" height="900" fill="url(#sky)"/>
+      <rect width="1600" height="900" fill="url(#sun)"/>
+      <path d="M0 710 C180 650 320 640 510 690 C640 724 760 744 930 700 C1120 650 1330 655 1600 735 V900 H0 Z" fill="${base[0]}"/>
+      <path d="M0 760 C170 715 355 725 555 768 C755 811 990 770 1160 734 C1325 698 1470 704 1600 760 V900 H0 Z" fill="${base[1]}"/>
+      <path d="M0 815 C205 790 410 798 608 832 C830 870 1040 842 1260 808 C1410 784 1525 790 1600 820 V900 H0 Z" fill="${base[2]}"/>
+      <circle cx="1280" cy="170" r="8" fill="${accent}" opacity="0.9"/>
+      <circle cx="1190" cy="120" r="5" fill="${accent}" opacity="0.7"/>
+      <circle cx="1360" cy="250" r="4" fill="${accent}" opacity="0.55"/>
+    </svg>
+  `
+
+  const objectUrl = encodeSvgDataUri(svg)
+  return {
+    id: `studio-${title.toLowerCase().replace(/\s+/g, '-')}`,
+    title,
+    thumb: objectUrl,
+    full: objectUrl,
+    objectUrl,
+    source: 'Studio',
+    queryTerms,
+  }
+}
+
+const STUDIO_BACKGROUNDS = [
+  createStudioBackground({
+    title: 'Olive Grove Dawn',
+    accent: '#f7d774',
+    base: ['#39452f', '#7f7a4a', '#1d2417'],
+    glow: '#f6d88d',
+    sky: ['#1e2e45', '#7a8b7a', '#dec08e'],
+    queryTerms: ['olive', 'grove', 'garden', 'dawn', 'sunrise', 'nature'],
+  }),
+  createStudioBackground({
+    title: 'Galilee Morning',
+    accent: '#f4f8ff',
+    base: ['#21475f', '#4f94ad', '#0d2230'],
+    glow: '#e4f3ff',
+    sky: ['#173955', '#71b7d4', '#d8eef8'],
+    queryTerms: ['galilee', 'sea', 'water', 'shore', 'morning'],
+  }),
+  createStudioBackground({
+    title: 'Desert Light',
+    accent: '#ffe2a2',
+    base: ['#6e4323', '#b47b4a', '#3d2413'],
+    glow: '#ffd28a',
+    sky: ['#3c2a2e', '#a66645', '#f0c58d'],
+    queryTerms: ['desert', 'wilderness', 'sand', 'dunes', 'sunset'],
+  }),
+  createStudioBackground({
+    title: 'Temple Steps',
+    accent: '#f6df97',
+    base: ['#4a3724', '#8e6b49', '#23170f'],
+    glow: '#f1c96c',
+    sky: ['#2d2f43', '#866544', '#d8b275'],
+    queryTerms: ['temple', 'stone', 'steps', 'jerusalem', 'ancient'],
+  }),
+  createStudioBackground({
+    title: 'Manuscript Gold',
+    accent: '#fff0b8',
+    base: ['#9b7d48', '#cdb381', '#5d4827'],
+    glow: '#f2d17a',
+    sky: ['#5c472c', '#b8965f', '#f2debc'],
+    queryTerms: ['manuscript', 'parchment', 'scroll', 'book', 'gold'],
+  }),
+  createStudioBackground({
+    title: 'Cedar Evening',
+    accent: '#f6c177',
+    base: ['#2b1b17', '#5d3b2d', '#140d0b'],
+    glow: '#d6a063',
+    sky: ['#111827', '#4c3b36', '#8d6549'],
+    queryTerms: ['cedar', 'forest', 'wood', 'night', 'evening'],
+  }),
+  createStudioBackground({
+    title: 'Wilderness Stars',
+    accent: '#dce9ff',
+    base: ['#2e271d', '#5d4e37', '#120f0b'],
+    glow: '#d1d9ff',
+    sky: ['#07111f', '#273754', '#58607f'],
+    queryTerms: ['wilderness', 'stars', 'night', 'mountain', 'sky'],
+  }),
+  createStudioBackground({
+    title: 'River of Life',
+    accent: '#d8f8ff',
+    base: ['#244249', '#5a8f90', '#12252a'],
+    glow: '#c4f1ff',
+    sky: ['#0d2234', '#427181', '#c0e5ea'],
+    queryTerms: ['river', 'water', 'life', 'reflection', 'peace'],
+  }),
+]
+
+function searchStudioBackgrounds(query) {
+  const normalized = String(query || '').toLowerCase().trim()
+  const tokens = normalized.split(/[^a-z0-9]+/).filter(Boolean)
+  const scored = STUDIO_BACKGROUNDS.map((background) => {
+    const searchable = `${background.title} ${background.queryTerms.join(' ')}`.toLowerCase()
+    const score = tokens.reduce((total, token) => total + (searchable.includes(token) ? 2 : 0), 0)
+    return { background, score }
+  })
+    .sort((left, right) => right.score - left.score)
+    .map((entry) => entry.background)
+
+  return tokens.length ? scored : STUDIO_BACKGROUNDS
+}
+
+const BIBLICAL_NOTES = {
+  beginning: 'Scripture uses this word to mark origin, priority, and first things. It often frames creation, covenant history, or the starting point of divine action.',
+  word: 'In Johannine theology this term becomes profoundly Christological, presenting the Son as the self-expression, wisdom, and communicative agency of God.',
+  god: 'This word anchors the text’s doctrine of divine identity, sovereignty, covenant relation, and the source of life, judgment, and revelation.',
+  life: 'Biblically, life is more than biological existence. It names vitality given by God, covenant flourishing, and participation in divine fullness.',
+  light: 'Light regularly signals revelation, holiness, order, salvation, and the exposure of darkness. It is one of Scripture’s most concentrated theological metaphors.',
+  darkness: 'Darkness can describe chaos, moral blindness, judgment, alienation, or resistance to revelation. It often functions as the negative foil to divine light.',
+  comprehended: 'This term opens interpretive space between understanding and overcoming, showing how darkness neither truly grasps nor defeats the light.',
+  created: 'Creation language points to divine initiative, ordering power, and God’s authority over all that exists.',
+  made: 'This verb often marks what God brings into being, what history becomes, or what comes to pass under providence.',
+  fountain: 'Water-source imagery is a biblical shorthand for sustained life, blessing, refreshment, and access to God’s abundance.',
+  lovingkindness: 'This language gathers covenant mercy, faithful love, and the durable loyalty of God toward his people.',
+}
+
+const ORIGINAL_LANGUAGE_LIBRARY = {
+  beginning: {
+    root: 'ראשׁ / ἀρχ',
+    greek: 'ἀρχή',
+    greekTranslit: 'arche',
+    hebrew: 'רֵאשִׁית',
+    hebrewTranslit: 'reshith',
+    aramaic: 'רֵאשִׁיתָא',
+    aramaicTranslit: 'reshitha',
+  },
+  word: {
+    root: 'λεγ / אמר',
+    greek: 'λόγος',
+    greekTranslit: 'logos',
+    hebrew: 'דָּבָר',
+    hebrewTranslit: 'davar',
+    aramaic: 'מֶמְרָא',
+    aramaicTranslit: 'memra',
+  },
+  god: {
+    root: 'אלה / θε',
+    greek: 'θεός',
+    greekTranslit: 'theos',
+    hebrew: 'אֱלֹהִים',
+    hebrewTranslit: 'elohim',
+    aramaic: 'אֱלָהּ',
+    aramaicTranslit: 'elah',
+  },
+  created: {
+    root: 'ברא / κτιζ',
+    greek: 'κτίζω',
+    greekTranslit: 'ktizo',
+    hebrew: 'בָּרָא',
+    hebrewTranslit: 'bara',
+    aramaic: 'בְּרָא',
+    aramaicTranslit: 'bera',
+  },
+  made: {
+    root: 'עשׂה / γιν',
+    greek: 'γίνομαι',
+    greekTranslit: 'ginomai',
+    hebrew: 'עָשָׂה',
+    hebrewTranslit: 'asah',
+    aramaic: 'עֲבַד',
+    aramaicTranslit: 'avad',
+  },
+  life: {
+    root: 'חי / ζω',
+    greek: 'ζωή',
+    greekTranslit: 'zoe',
+    hebrew: 'חַיִּים',
+    hebrewTranslit: 'chayyim',
+    aramaic: 'חַיֵּי',
+    aramaicTranslit: 'chayye',
+  },
+  light: {
+    root: 'אור / φω',
+    greek: 'φῶς',
+    greekTranslit: 'phos',
+    hebrew: 'אוֹר',
+    hebrewTranslit: 'or',
+    aramaic: 'נְהוֹרָא',
+    aramaicTranslit: 'nehora',
+  },
+  darkness: {
+    root: 'חשׁך / σκοτ',
+    greek: 'σκοτία',
+    greekTranslit: 'skotia',
+    hebrew: 'חֹשֶׁךְ',
+    hebrewTranslit: 'choshek',
+    aramaic: 'חֲשׁוֹכָא',
+    aramaicTranslit: 'chashoka',
+  },
+  comprehended: {
+    root: 'לכד / λαμβ',
+    greek: 'καταλαμβάνω',
+    greekTranslit: 'katalambano',
+    hebrew: 'לָכַד',
+    hebrewTranslit: 'lakhad',
+    aramaic: 'אֲחַד',
+    aramaicTranslit: 'achad',
+  },
+  fountain: {
+    root: 'עין / πηγ',
+    greek: 'πηγή',
+    greekTranslit: 'pege',
+    hebrew: 'מָקוֹר',
+    hebrewTranslit: 'maqor',
+    aramaic: 'מַבּוּעָא',
+    aramaicTranslit: 'mabbua',
+  },
+  lovingkindness: {
+    root: 'חסד / ἐλε',
+    greek: 'ἔλεος',
+    greekTranslit: 'eleos',
+    hebrew: 'חֶסֶד',
+    hebrewTranslit: 'chesed',
+    aramaic: 'טֵיבוּתָא',
+    aramaicTranslit: 'tevutha',
+  },
+  blood: {
+    root: 'דם / αἱμ',
+    greek: 'αἷμα',
+    greekTranslit: 'haima',
+    hebrew: 'דָּם',
+    hebrewTranslit: 'dam',
+    aramaic: 'דְּמָא',
+    aramaicTranslit: 'dema',
+  },
+  passover: {
+    root: 'פסח / πασχ',
+    greek: 'πάσχα',
+    greekTranslit: 'pascha',
+    hebrew: 'פֶּסַח',
+    hebrewTranslit: 'pesach',
+    aramaic: 'פִּסְחָא',
+    aramaicTranslit: 'pischa',
+  },
+  memorial: {
+    root: 'זכר / μνη',
+    greek: 'μνημόσυνον',
+    greekTranslit: 'mnemosynon',
+    hebrew: 'זִכָּרוֹן',
+    hebrewTranslit: 'zikkaron',
+    aramaic: 'דֻּכְרָנָא',
+    aramaicTranslit: 'dukhrana',
+  },
+  blessed: {
+    root: 'ברך / μακαρ',
+    greek: 'μακάριος',
+    greekTranslit: 'makarios',
+    hebrew: 'אַשְׁרֵי',
+    hebrewTranslit: 'ashre',
+    aramaic: 'טוּבַי',
+    aramaicTranslit: 'tuvay',
+  },
+  kingdom: {
+    root: 'מלך / βασιλ',
+    greek: 'βασιλεία',
+    greekTranslit: 'basileia',
+    hebrew: 'מַלְכוּת',
+    hebrewTranslit: 'malkuth',
+    aramaic: 'מַלְכוּתָא',
+    aramaicTranslit: 'malkutha',
+  },
+  righteousness: {
+    root: 'צדק / δικ',
+    greek: 'δικαιοσύνη',
+    greekTranslit: 'dikaiosyne',
+    hebrew: 'צְדָקָה',
+    hebrewTranslit: 'tsedaqah',
+    aramaic: 'זַדִּיקוּתָא',
+    aramaicTranslit: 'zaddiqutha',
+  },
+  spirit: {
+    root: 'רוח / πνευ',
+    greek: 'πνεῦμα',
+    greekTranslit: 'pneuma',
+    hebrew: 'רוּחַ',
+    hebrewTranslit: 'ruach',
+    aramaic: 'רוּחָא',
+    aramaicTranslit: 'rucha',
+  },
+  law: {
+    root: 'ירה / νομ',
+    greek: 'νόμος',
+    greekTranslit: 'nomos',
+    hebrew: 'תּוֹרָה',
+    hebrewTranslit: 'torah',
+    aramaic: 'אוֹרָיְתָא',
+    aramaicTranslit: 'orayta',
+  },
+  new: {
+    root: 'חדשׁ / καιν',
+    greek: 'καινός',
+    greekTranslit: 'kainos',
+    hebrew: 'חָדָשׁ',
+    hebrewTranslit: 'chadash',
+    aramaic: 'חַדְתָּא',
+    aramaicTranslit: 'chadta',
+  },
+  tabernacle: {
+    root: 'שׁכן / σκην',
+    greek: 'σκηνή',
+    greekTranslit: 'skene',
+    hebrew: 'מִשְׁכָּן',
+    hebrewTranslit: 'mishkan',
+    aramaic: 'מַשְׁכְּנָא',
+    aramaicTranslit: 'mashkena',
+  },
+  tear: {
+    root: 'דמע / δακρυ',
+    greek: 'δάκρυον',
+    greekTranslit: 'dakryon',
+    hebrew: 'דִּמְעָה',
+    hebrewTranslit: 'dimah',
+    aramaic: 'דִּמְעָא',
+    aramaicTranslit: 'dimah',
+  },
+  tears: {
+    root: 'דמע / δακρυ',
+    greek: 'δάκρυα',
+    greekTranslit: 'dakrya',
+    hebrew: 'דִּמְעוֹת',
+    hebrewTranslit: 'dimoth',
+    aramaic: 'דִּמְעִין',
+    aramaicTranslit: 'dimin',
+  },
+}
+
+function capitalizeWord(word) {
+  return word.charAt(0).toUpperCase() + word.slice(1)
+}
+
+function inferEnglishDefinition(word) {
+  const articles = new Set(['the', 'a', 'an'])
+  const conjunctions = new Set(['and', 'for', 'therefore', 'that'])
+  const prepositions = new Set(['in', 'with', 'by', 'of', 'under', 'upon', 'without'])
+  const pronouns = new Set(['him', 'it', 'thee', 'them', 'they', 'thou', 'thy', 'we', 'their'])
+  const verbs = new Set(['is', 'was', 'were', 'be', 'said', 'make', 'made', 'created', 'drink', 'see', 'put', 'trust', 'let', 'shineth', 'comprehended', 'satisfied'])
+
+  if (articles.has(word)) return 'Definite or indefinite article in the English translation, identifying a noun as specific or non-specific.'
+  if (conjunctions.has(word)) return 'Connective term in the English translation, linking clauses, reasons, or logical development within the verse.'
+  if (prepositions.has(word)) return 'Relational term in the English translation, indicating location, agency, source, or association.'
+  if (pronouns.has(word)) return 'Pronoun in the English translation, referring back to a person, object, or group already introduced in context.'
+  if (verbs.has(word)) return 'Verb form in the English translation, expressing being, action, or movement in the verse.'
+  return 'English surface-form entry for this word in the current local Bible study corpus.'
+}
+
+function inferBiblicalNote(word, occurrences, lexiconEntry) {
+  if (BIBLICAL_NOTES[word]) return BIBLICAL_NOTES[word]
+
+  const uniqueBooks = [...new Set(occurrences.map((item) => item.book))]
+
+  if (lexiconEntry) {
+    return `This word carries lexical weight beyond a single verse. In the current corpus it appears across ${uniqueBooks.join(', ')}, where it contributes to repeated theological themes and intertextual echoes.`
+  }
+
+  if (uniqueBooks.length > 1) {
+    return `Within the current study corpus, this word appears across ${uniqueBooks.join(', ')}, making it useful for tracing repeated biblical language and thematic resonance.`
+  }
+
+  return `This word is presently indexed within ${uniqueBooks[0] || 'the loaded reading set'}. Its biblical value comes from how it participates in the verse’s larger theological and literary movement.`
+}
+
+function buildWordStudyLibrary(readings) {
+  const library = {}
+
+  Object.entries(readings).forEach(([book, reading]) => {
+    reading.verses.forEach((verse) => {
+      const tokens = verse.text
+        .toLowerCase()
+        .split(/[^a-z']+/)
+        .filter(Boolean)
+
+      tokens.forEach((word) => {
+        if (!library[word]) {
+          library[word] = {
+            word,
+            occurrences: [],
+          }
+        }
+
+        library[word].occurrences.push({
+          book,
+          chapter: reading.chapter,
+          verse: verse.number,
+          excerpt: verse.text,
+          readingTitle: reading.title,
+        })
+      })
+    })
+  })
+
+  Object.keys(library).forEach((word) => {
+    const occurrenceSet = library[word]
+    const lexiconEntry = Object.values(readings)
+      .map((reading) => reading.lexicon?.[word])
+      .find(Boolean)
+
+    const distributionMap = occurrenceSet.occurrences.reduce((acc, occurrence) => {
+      acc[occurrence.book] = (acc[occurrence.book] || 0) + 1
+      return acc
+    }, {})
+
+    library[word] = enrichLexiconEntry(word, {
+      lemma: lexiconEntry?.lemma || capitalizeWord(word),
+      translit: lexiconEntry?.translit || word,
+      strongs: lexiconEntry?.strongs || 'ENG',
+      freq: lexiconEntry?.freq || occurrenceSet.occurrences.length,
+      def: lexiconEntry?.def || inferEnglishDefinition(word),
+      biblicalNote: inferBiblicalNote(word, occurrenceSet.occurrences, lexiconEntry),
+      distribution: lexiconEntry?.distribution || Object.entries(distributionMap).map(([label, value]) => ({ label, value })),
+      topVerses: lexiconEntry?.topVerses || occurrenceSet.occurrences.map((occurrence) => `${occurrence.book} ${occurrence.chapter}:${occurrence.verse}`),
+      concordance: occurrenceSet.occurrences,
+    })
+  })
+
+  return library
+}
+
+const WORD_STUDY_LIBRARY = buildWordStudyLibrary(READINGS)
+
+function BibleReaderPage() {
+  const { mode, themeName, themes, toggleMode, setThemeName } = useTheme()
+  const studyToolsUnlocked = true
+
+  const readingColumnRef = useRef(null)
+  const notesTimerRef = useRef(null)
+  const tokenRefs = useRef({})
+  const lastImageUrlRef = useRef('')
+  const selectedBackgroundUrlRef = useRef('')
+
+  const [readingList, setReadingList] = useState([])
+  const [book, setBook] = useState('John')
+  const [reading, setReading] = useState(null)
+  const [chapter, setChapter] = useState(1)
+  const [translation, setTranslation] = useState(DEFAULT_TRANSLATION)
+  const [focusVerse, setFocusVerse] = useState(1)
+  const [fontScale, setFontScale] = useState(1.5)
+  const [lineHeight, setLineHeight] = useState(1.8)
+  const [hasLoadedPreferences, setHasLoadedPreferences] = useState(false)
+  const [tab, setTab] = useState('notes')
+  const [notes, setNotes] = useState('')
+  const [saveState, setSaveState] = useState('')
+  const [selectedWordKey, setSelectedWordKey] = useState('')
+  const [highlightedTokens, setHighlightedTokens] = useState({})
+  const [tooltip, setTooltip] = useState(null)
+  const [selectionMenu, setSelectionMenu] = useState({ open: false, x: 0, y: 0, text: '', tokenIds: [] })
+  const [isThemePanelOpen, setIsThemePanelOpen] = useState(false)
+  const [authDialogFeature, setAuthDialogFeature] = useState('')
+  const [selectedVerseNumbers, setSelectedVerseNumbers] = useState([])
+  const [imageModalOpen, setImageModalOpen] = useState(false)
+  const [verseImageTheme, setVerseImageTheme] = useState('current')
+  const [verseImageFont, setVerseImageFont] = useState('goudy')
+  const [backgroundSearchQuery, setBackgroundSearchQuery] = useState('')
+  const [backgroundSearchSource, setBackgroundSearchSource] = useState(DEFAULT_IMAGE_SEARCH_SOURCE)
+  const [backgroundSearchResults, setBackgroundSearchResults] = useState([])
+  const [backgroundSearchStatus, setBackgroundSearchStatus] = useState('idle')
+  const [backgroundSearchError, setBackgroundSearchError] = useState('')
+  const [availableImageSearchSources, setAvailableImageSearchSources] = useState(
+    [LOCAL_STUDIO_SOURCE, ...(hasSupabaseEnv ? [] : [{ id: 'commons', label: 'Wikimedia Commons', enabled: true }])],
+  )
+  const [selectedBackground, setSelectedBackground] = useState(null)
+  const [aiQuestion, setAiQuestion] = useState('')
+  const [chatHistory, setChatHistory] = useState([
+    {
+      role: 'assistant',
+      text: 'I am your exegetical guide. Ask me about the Greek morphology, historical context, or theological themes of John 1.',
+    },
+  ])
+
+  useEffect(() => {
+    let cancelled = false
+
+    getReadings()
+      .then((items) => {
+        if (cancelled || !Array.isArray(items)) return
+        setReadingList(items)
+        if (items.length > 0 && !items.some((item) => item.book === book)) {
+          setBook(items[0].book)
+        }
+      })
+      .catch(() => {})
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+
+    getPreferences()
+      .then((preferences) => {
+        if (cancelled) return
+        setFontScale(Number(preferences.fontScale || 1.5))
+        setLineHeight(Number(preferences.lineHeight || 1.8))
+        setHasLoadedPreferences(true)
+      })
+      .catch(() => {
+        if (!cancelled) setHasLoadedPreferences(true)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!hasLoadedPreferences) return
+    savePreferences({ fontScale, lineHeight }).catch(() => {})
+  }, [fontScale, hasLoadedPreferences, lineHeight])
+
+  useEffect(() => {
+    let cancelled = false
+
+    getVerseImageSources()
+      .then((payload) => {
+        if (cancelled) return
+        const remoteSources = Array.isArray(payload?.sources) && payload.sources.length
+          ? payload.sources
+          : [{ id: 'commons', label: 'Wikimedia Commons', enabled: true }]
+        const sources = [LOCAL_STUDIO_SOURCE, ...remoteSources.filter((source) => source.id !== LOCAL_STUDIO_SOURCE.id)]
+        setAvailableImageSearchSources(sources)
+        setBackgroundSearchSource((current) => (
+          sources.some((source) => source.id === current)
+            ? current
+            : sources[0]?.id || DEFAULT_IMAGE_SEARCH_SOURCE
+        ))
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAvailableImageSearchSources([LOCAL_STUDIO_SOURCE, { id: 'commons', label: 'Wikimedia Commons', enabled: true }])
+          setBackgroundSearchSource(DEFAULT_IMAGE_SEARCH_SOURCE)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+
+    setReading(null)
+    getReading(book, chapter, translation)
+      .then((nextReading) => {
+        if (cancelled || !nextReading) return
+        setReading(nextReading)
+        setChapter(nextReading.chapter)
+        setFocusVerse(nextReading.verses[0]?.number || 1)
+
+        const lexicon = nextReading.lexicon || {}
+        const defaultWord =
+          nextReading.verses
+            .flatMap((verse) => splitText(verse.text).map(cleanWord))
+            .find(Boolean) || Object.keys(lexicon)[0] || ''
+        setSelectedWordKey(defaultWord)
+        setTab('notes')
+        setSelectionMenu({ open: false, x: 0, y: 0, text: '', tokenIds: [] })
+        setTooltip(null)
+        setSelectedVerseNumbers([])
+        setImageModalOpen(false)
+        setVerseImageFont('goudy')
+        setBackgroundSearchQuery('')
+        setBackgroundSearchSource((current) => current || DEFAULT_IMAGE_SEARCH_SOURCE)
+        setBackgroundSearchResults([])
+        setBackgroundSearchStatus('idle')
+        setBackgroundSearchError('')
+        if (selectedBackgroundUrlRef.current) {
+          URL.revokeObjectURL(selectedBackgroundUrlRef.current)
+          selectedBackgroundUrlRef.current = ''
+        }
+        setSelectedBackground(null)
+        if (lastImageUrlRef.current) {
+          URL.revokeObjectURL(lastImageUrlRef.current)
+          lastImageUrlRef.current = ''
+        }
+
+        return getReaderState(nextReading.key).then((state) => {
+          if (cancelled) return
+          const sanitizedNotes = sanitizeLoadedNotes(state.notes || '')
+          setNotes(sanitizedNotes)
+          setHighlightedTokens(normalizeHighlights(state.highlights || {}))
+          setSaveState('Saved locally.')
+          if (sanitizedNotes !== (state.notes || '')) {
+            saveReaderState(nextReading.key, {
+              notes: sanitizedNotes,
+              highlights: state.highlights || {},
+            }).catch(() => {})
+          }
+          setChatHistory([
+            {
+              role: 'assistant',
+              text: `I am your exegetical guide. Ask me about language, historical context, canonical links, or theological themes in ${nextReading.title} ${nextReading.chapter}.`,
+            },
+          ])
+        })
+      })
+      .catch(() => {
+        if (!cancelled) setSaveState('Unable to load reader state.')
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [book, chapter, translation])
+
+  useEffect(() => () => {
+    if (notesTimerRef.current) window.clearTimeout(notesTimerRef.current)
+    if (lastImageUrlRef.current) URL.revokeObjectURL(lastImageUrlRef.current)
+    if (selectedBackgroundUrlRef.current) URL.revokeObjectURL(selectedBackgroundUrlRef.current)
+  }, [])
+
+  useEffect(() => {
+    const handleMouseDown = (event) => {
+      const menuEl = document.getElementById('selection-menu')
+      const themePanelEl = document.querySelector('.reader-theme-ui')
+      const shareMenuEl = document.getElementById('verse-share-menu')
+      const imageModalEl = document.getElementById('verse-image-modal')
+      if (themePanelEl?.contains(event.target)) return
+      if (menuEl?.contains(event.target)) return
+      if (shareMenuEl?.contains(event.target)) return
+      if (imageModalEl?.contains(event.target)) return
+      if (readingColumnRef.current?.contains(event.target)) return
+      setSelectionMenu((current) => ({ ...current, open: false }))
+      setIsThemePanelOpen(false)
+    }
+
+    document.addEventListener('mousedown', handleMouseDown)
+    return () => document.removeEventListener('mousedown', handleMouseDown)
+  }, [])
+
+  useEffect(() => {
+    if (!imageModalOpen) return undefined
+
+    const handleKeyDown = (event) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      setImageModalOpen(false)
+      setSaveState('Image studio closed.')
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [imageModalOpen])
+
+  const currentWordStudyLibrary = useMemo(
+    () => (reading ? buildWordStudyLibrary({ [book]: reading }) : {}),
+    [book, reading],
+  )
+
+  const readingWordEntries = useMemo(() => {
+    const keys = new Set()
+    reading?.verses.forEach((verse) => {
+      splitText(verse.text).forEach((token) => {
+        const clean = cleanWord(token)
+        if (clean) keys.add(clean)
+      })
+    })
+
+    return [...keys]
+      .map((word) => ({ key: word, entry: enrichLexiconEntry(word, WORD_STUDY_LIBRARY[word] || currentWordStudyLibrary[word]) }))
+      .filter((item) => item.entry)
+  }, [currentWordStudyLibrary, reading])
+  const selectedEntry =
+    (selectedWordKey ? enrichLexiconEntry(selectedWordKey, WORD_STUDY_LIBRARY[selectedWordKey]) : null) ||
+    readingWordEntries.find((item) => item.key === selectedWordKey)?.entry ||
+    readingWordEntries[0]?.entry
+  const openSignupForStudyTools = () => setAuthDialogFeature('Dictionary, Concordance, and Commentaries')
+  const selectedVerses = useMemo(
+    () => reading?.verses.filter((verse) => selectedVerseNumbers.includes(verse.number)) || [],
+    [reading, selectedVerseNumbers],
+  )
+  const selectedVerseLabel = useMemo(() => {
+    if (!selectedVerses.length) return ''
+    if (selectedVerses.length === 1) return `${book} ${chapter}:${selectedVerses[0].number}`
+    return `${book} ${chapter}:${selectedVerses[0].number}-${selectedVerses[selectedVerses.length - 1].number}`
+  }, [book, chapter, selectedVerses])
+  const selectedVerseText = useMemo(
+    () => selectedVerses.map((verse) => `${verse.number} ${verse.text}`).join(' '),
+    [selectedVerses],
+  )
+  const effectiveBackgroundQuery = backgroundSearchQuery.trim() || `${book} bible verse background`
+  const verseImagePalette = useMemo(() => {
+    if (verseImageTheme === 'desert') {
+      return {
+        background: 'linear-gradient(135deg, #7c3f18, #d6a268)',
+        accent: '#fde68a',
+        text: '#fffaf0',
+      }
+    }
+
+    if (verseImageTheme === 'sea') {
+      return {
+        background: 'linear-gradient(135deg, #0f3d56, #5aa9c4)',
+        accent: '#bae6fd',
+        text: '#effbff',
+      }
+    }
+
+    if (verseImageTheme === 'parchment') {
+      return {
+        background: 'linear-gradient(135deg, #d8c7a1, #8d6e3f)',
+        accent: '#5b4320',
+        text: '#2b1f0e',
+      }
+    }
+
+    if (verseImageTheme === 'cedar') {
+      return {
+        background: 'linear-gradient(135deg, #4a2c1d, #8b5e3c, #2f1b12)',
+        accent: '#f6c177',
+        text: '#fff5eb',
+      }
+    }
+
+    if (verseImageTheme === 'linen') {
+      return {
+        background: 'linear-gradient(135deg, #f3ead8, #d6c6a5)',
+        accent: '#8b6f47',
+        text: '#2f2416',
+      }
+    }
+
+    if (verseImageTheme === 'sunrise') {
+      return {
+        background: 'linear-gradient(135deg, #f59e0b, #7c2d12)',
+        accent: '#fde68a',
+        text: '#fffdf7',
+      }
+    }
+
+    if (verseImageTheme === 'midnight') {
+      return {
+        background: 'linear-gradient(135deg, #0f172a, #1d4ed8)',
+        accent: '#93c5fd',
+        text: '#eff6ff',
+      }
+    }
+
+    if (verseImageTheme === 'olive') {
+      return {
+        background: 'linear-gradient(135deg, #1f3b2d, #84754e)',
+        accent: '#facc15',
+        text: '#f8fafc',
+      }
+    }
+
+    if (verseImageTheme === 'eden') {
+      return {
+        background: 'radial-gradient(circle at top, #d4f5c4 0%, #41644a 48%, #1d2f22 100%)',
+        accent: '#fef08a',
+        text: '#f7fee7',
+      }
+    }
+
+    if (verseImageTheme === 'temple') {
+      return {
+        background: 'linear-gradient(135deg, #3f2a1d, #b08968, #6b3f1d)',
+        accent: '#fcd34d',
+        text: '#fff7ed',
+      }
+    }
+
+    if (verseImageTheme === 'galilee') {
+      return {
+        background: 'linear-gradient(145deg, #0f4c5c, #3ba7b8, #d3f3ff)',
+        accent: '#e0f2fe',
+        text: '#f8fdff',
+      }
+    }
+
+    if (verseImageTheme === 'wilderness') {
+      return {
+        background: 'linear-gradient(145deg, #5a4a2c, #9f7a3f, #2d2617)',
+        accent: '#facc15',
+        text: '#fffaf0',
+      }
+    }
+
+    if (verseImageTheme === 'goldleaf') {
+      return {
+        background: 'linear-gradient(145deg, #3d2d0c, #b98a24, #f3d36b)',
+        accent: '#fff1b2',
+        text: '#23180a',
+      }
+    }
+
+    return {
+      background: `linear-gradient(135deg, rgb(var(--c-bg)), rgba(var(--c-accent), 0.85))`,
+      accent: 'rgb(var(--c-accent))',
+      text: 'rgb(var(--c-text))',
+    }
+  }, [verseImageTheme])
+  const shareTargets = [
+    {
+      label: 'Copy Link',
+      action: async () => {
+        const copied = await writeClipboardText(window.location.href)
+        setSaveState(copied ? 'Link copied.' : 'Unable to copy the link in this browser.')
+      },
+    },
+    {
+      label: 'Copy Verse',
+      action: copySelectedVerses,
+    },
+    {
+      label: 'X',
+      action: () => {
+        window.open(
+          `https://twitter.com/intent/tweet?text=${encodeURIComponent(`${selectedVerseText} — ${selectedVerseLabel}`)}`,
+          '_blank',
+          'noopener,noreferrer',
+        )
+        setSaveState('Opening X share.')
+      },
+    },
+    {
+      label: 'Facebook',
+      action: () => {
+        window.open(
+          `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(window.location.href)}&quote=${encodeURIComponent(`${selectedVerseText} — ${selectedVerseLabel}`)}`,
+          '_blank',
+          'noopener,noreferrer',
+        )
+        setSaveState('Opening Facebook share.')
+      },
+    },
+    {
+      label: 'WhatsApp',
+      action: () => {
+        window.open(
+          `https://wa.me/?text=${encodeURIComponent(`${selectedVerseText} — ${selectedVerseLabel} ${window.location.href}`)}`,
+          '_blank',
+          'noopener,noreferrer',
+        )
+        setSaveState('Opening WhatsApp share.')
+      },
+    },
+    {
+      label: 'Email',
+      action: () => {
+        window.location.href = `mailto:?subject=${encodeURIComponent(selectedVerseLabel)}&body=${encodeURIComponent(`${selectedVerseText}\n\n${window.location.href}`)}`
+        setSaveState('Opening email share.')
+      },
+    },
+  ]
+  const selectedVerseImageFont = useMemo(
+    () => VERSE_IMAGE_FONTS.find((font) => font.id === verseImageFont) || VERSE_IMAGE_FONTS[0],
+    [verseImageFont],
+  )
+  const verseImagePreviewStyle = useMemo(() => {
+    if (!selectedBackground?.objectUrl) {
+      return {
+        backgroundImage: verseImagePalette.background,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+      }
+    }
+
+    return {
+      backgroundImage: `linear-gradient(135deg, rgba(7, 10, 16, 0.56), rgba(7, 10, 16, 0.18)), url(${selectedBackground.objectUrl})`,
+      backgroundSize: 'cover',
+      backgroundPosition: 'center',
+    }
+  }, [selectedBackground, verseImagePalette.background])
+  const donutSegments = useMemo(
+    () => buildStrokeSegments(selectedEntry?.distribution || [], selectedEntry?.freq || 0, 36),
+    [selectedEntry],
+  )
+
+  const persistReaderState = (nextNotes, nextHighlights, status = 'Saved locally.') => {
+    if (!reading) return
+
+    saveReaderState(reading.key, {
+      notes: nextNotes,
+      highlights: nextHighlights,
+    })
+      .then((state) => {
+        setNotes(state.notes || '')
+        setHighlightedTokens(normalizeHighlights(state.highlights || {}))
+        setSaveState(status)
+        if (notesTimerRef.current) window.clearTimeout(notesTimerRef.current)
+        notesTimerRef.current = window.setTimeout(() => setSaveState(''), 2000)
+      })
+      .catch(() => {
+        setSaveState('Save failed.')
+      })
+  }
+
+  const handleSelection = () => {
+    window.setTimeout(() => {
+      const selection = window.getSelection()
+      if (!selection || selection.isCollapsed || selection.toString().trim().length === 0) {
+        setSelectionMenu((current) => ({ ...current, open: false }))
+        return
+      }
+
+      const range = selection.getRangeAt(0)
+      const rect = range.getBoundingClientRect()
+      const tokenIds = Object.entries(tokenRefs.current)
+        .filter(([, node]) => node && selection.containsNode(node, true) && node.textContent.trim().length > 0)
+        .map(([tokenId]) => tokenId)
+
+      setSelectionMenu({
+        open: true,
+        text: selection.toString().trim(),
+        tokenIds,
+        x: rect.left + rect.width / 2,
+        y: rect.top - 55,
+      })
+    }, 50)
+  }
+
+  const applyHighlight = (color) => {
+    const selection = window.getSelection()
+    const tokenIds = selection && !selection.isCollapsed
+      ? Object.entries(tokenRefs.current)
+        .filter(([, node]) => node && selection.containsNode(node, true) && node.textContent.trim().length > 0)
+        .map(([tokenId]) => tokenId)
+      : selectionMenu.tokenIds
+
+    if (!tokenIds.length) return
+
+    const nextHighlights = { ...highlightedTokens }
+    tokenIds.forEach((tokenId) => {
+      nextHighlights[tokenId] = color
+    })
+
+    setHighlightedTokens(nextHighlights)
+    persistReaderState(notes, nextHighlights)
+    selection?.removeAllRanges()
+    setSelectionMenu((current) => ({ ...current, open: false }))
+  }
+
+  const applyCustomHighlight = (event) => {
+    const value = event.target.value
+    const r = Number.parseInt(value.slice(1, 3), 16)
+    const g = Number.parseInt(value.slice(3, 5), 16)
+    const b = Number.parseInt(value.slice(5, 7), 16)
+    applyHighlight(`rgba(${r}, ${g}, ${b}, 0.4)`)
+  }
+
+  const clearHighlight = () => {
+    const selection = window.getSelection()
+    const tokenIds = selection && !selection.isCollapsed
+      ? Object.entries(tokenRefs.current)
+        .filter(([, node]) => node && selection.containsNode(node, true))
+        .map(([tokenId]) => tokenId)
+      : selectionMenu.tokenIds
+
+    if (!tokenIds.length) return
+
+    const nextHighlights = { ...highlightedTokens }
+    tokenIds.forEach((tokenId) => {
+      delete nextHighlights[tokenId]
+    })
+
+    setHighlightedTokens(nextHighlights)
+    persistReaderState(notes, nextHighlights)
+    selection?.removeAllRanges()
+    setSelectionMenu((current) => ({ ...current, open: false }))
+  }
+
+  const createNoteFromSelection = () => {
+    const selection = window.getSelection()
+    const text = selection?.toString().trim() || selectionMenu.text
+    if (!text) return
+
+    const entry = `${notes ? '\n\n' : ''}> "${text}"\n— ${book} ${chapter}`
+    const nextNotes = `${notes}${entry}\n\n`
+    setNotes(nextNotes)
+    setTab('notes')
+    persistReaderState(nextNotes, highlightedTokens)
+    selection?.removeAllRanges()
+    setSelectionMenu((current) => ({ ...current, open: false }))
+  }
+
+  const saveNotesNow = () => {
+    persistReaderState(notes, highlightedTokens)
+  }
+
+  const highlightSelectedVerses = (color = 'rgba(var(--c-accent), 0.4)') => {
+    if (!selectedVerseNumbers.length || !reading) return
+
+    const nextHighlights = { ...highlightedTokens }
+
+    reading.verses.forEach((verse) => {
+      if (!selectedVerseNumbers.includes(verse.number)) return
+
+      splitText(verse.text).forEach((token, tokenIndex) => {
+        const tokenId = `t-${verse.number}-${tokenIndex}`
+        if (token.trim() && !/^[.,;:?!]+$/.test(token)) {
+          nextHighlights[tokenId] = color
+        }
+      })
+    })
+
+    setHighlightedTokens(nextHighlights)
+    persistReaderState(notes, nextHighlights, 'Verses highlighted.')
+  }
+
+  const handleVerseSelect = (verseNumber, extendSelection = false) => {
+    setSelectedVerseNumbers((current) => {
+      if (!reading) return current
+      if (!extendSelection || current.length === 0) return [verseNumber]
+
+      const anchor = current[0]
+      const start = Math.min(anchor, verseNumber)
+      const end = Math.max(anchor, verseNumber)
+
+      return reading.verses
+        .map((verse) => verse.number)
+        .filter((number) => number >= start && number <= end)
+    })
+
+    setSaveState(`Selected ${book} ${chapter}:${verseNumber}.`)
+  }
+
+  const clearVerseSelection = () => {
+    setSelectedVerseNumbers([])
+    setSaveState('Verse selection cleared.')
+  }
+
+  async function copySelectedVerses() {
+    if (!selectedVerses.length) return
+    const payload = `${selectedVerseLabel}\n${selectedVerseText}`
+    const copied = await writeClipboardText(payload)
+    setSaveState(copied ? 'Verse copied.' : 'Unable to copy automatically in this browser.')
+  }
+
+  async function shareSelectedVerses() {
+    if (!selectedVerses.length) return
+    const sharePayload = {
+      title: selectedVerseLabel,
+      text: `${selectedVerseText} — ${selectedVerseLabel}`,
+      url: window.location.href,
+    }
+
+    if (navigator.share) {
+      try {
+        await navigator.share(sharePayload)
+        setSaveState('Shared.')
+        return
+      } catch {
+        // Fall back to in-app share links.
+      }
+    }
+
+    const copied = await writeClipboardText(`${sharePayload.text}\n${sharePayload.url}`)
+    setSaveState(copied ? 'Native share is unavailable here. Verse copied for sharing.' : 'Use the share links below.')
+  }
+
+  function openStudyForSelectedVerses() {
+    if (!selectedVerses.length) return
+
+    const firstVerse = selectedVerses[0]
+    const firstWord = splitText(firstVerse.text).map(cleanWord).find(Boolean)
+    if (firstWord) setSelectedWordKey(firstWord)
+    setTab('analysis')
+    document.querySelector('.reader-sidebar')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    setSaveState('Opened study panel.')
+  }
+
+  async function searchBackgroundResources() {
+    setBackgroundSearchStatus('loading')
+    setBackgroundSearchError('')
+
+    try {
+      if (backgroundSearchSource === LOCAL_STUDIO_SOURCE.id) {
+        const results = searchStudioBackgrounds(effectiveBackgroundQuery)
+        setBackgroundSearchResults(results)
+        setBackgroundSearchStatus('ready')
+        if (results.length === 0) {
+          setBackgroundSearchError('No studio backgrounds matched yet. Try a simpler phrase.')
+        }
+        return
+      }
+
+      const response = await searchVerseImageLibrary({
+        query: effectiveBackgroundQuery,
+        source: backgroundSearchSource,
+      })
+      const results = response.results || []
+      setBackgroundSearchResults(results)
+      setBackgroundSearchStatus('ready')
+      if (results.length === 0) {
+        setBackgroundSearchError('No images found for that search yet. Try a broader biblical phrase.')
+      }
+    } catch (error) {
+      setBackgroundSearchResults([])
+      setBackgroundSearchStatus('error')
+      setBackgroundSearchError(error instanceof Error ? error.message : 'The in-app image search could not load results right now.')
+    }
+  }
+
+  async function applyBackgroundResult(result) {
+    setBackgroundSearchStatus('loading')
+    setBackgroundSearchError('')
+
+    try {
+      if (selectedBackgroundUrlRef.current.startsWith('blob:')) {
+        URL.revokeObjectURL(selectedBackgroundUrlRef.current)
+      }
+      selectedBackgroundUrlRef.current = ''
+
+      let objectUrl = result.objectUrl || result.full
+      if (!result.objectUrl && !String(result.full || '').startsWith('data:')) {
+        const response = await fetch(result.full)
+        const blob = await response.blob()
+        objectUrl = URL.createObjectURL(blob)
+      }
+
+      selectedBackgroundUrlRef.current = objectUrl
+      setSelectedBackground({
+        ...result,
+        objectUrl,
+      })
+      setBackgroundSearchStatus('ready')
+      setSaveState(`Background applied from ${result.source}.`)
+    } catch {
+      setBackgroundSearchStatus('error')
+      setBackgroundSearchError('That image could not be applied. Try another result.')
+    }
+  }
+
+  function clearSelectedBackground(status = '') {
+    if (selectedBackgroundUrlRef.current.startsWith('blob:')) {
+      URL.revokeObjectURL(selectedBackgroundUrlRef.current)
+    }
+    selectedBackgroundUrlRef.current = ''
+    setSelectedBackground(null)
+    if (status) setSaveState(status)
+  }
+
+  function applyVerseImageTheme(themeId) {
+    clearSelectedBackground('Returned to built-in image styling.')
+    setVerseImageTheme(themeId)
+  }
+
+  const runBackgroundSearch = useEffectEvent(() => {
+    searchBackgroundResources()
+  })
+
+  useEffect(() => {
+    if (!imageModalOpen) return
+    const timer = window.setTimeout(() => {
+      runBackgroundSearch()
+    }, 0)
+
+    return () => window.clearTimeout(timer)
+  }, [imageModalOpen, backgroundSearchSource])
+
+  async function renderVerseImageCanvas() {
+    if (!selectedVerses.length) return
+
+    const canvas = document.createElement('canvas')
+    const context = canvas.getContext('2d')
+    if (!context) return null
+
+    canvas.width = 1080
+    canvas.height = 1350
+
+    const gradient = context.createLinearGradient(0, 0, canvas.width, canvas.height)
+    if (verseImageTheme === 'sunrise') {
+      gradient.addColorStop(0, '#f59e0b')
+      gradient.addColorStop(1, '#7c2d12')
+    } else if (verseImageTheme === 'midnight') {
+      gradient.addColorStop(0, '#0f172a')
+      gradient.addColorStop(1, '#1d4ed8')
+    } else if (verseImageTheme === 'olive') {
+      gradient.addColorStop(0, '#1f3b2d')
+      gradient.addColorStop(1, '#84754e')
+    } else if (verseImageTheme === 'eden') {
+      gradient.addColorStop(0, '#d4f5c4')
+      gradient.addColorStop(0.45, '#41644a')
+      gradient.addColorStop(1, '#1d2f22')
+    } else if (verseImageTheme === 'temple') {
+      gradient.addColorStop(0, '#3f2a1d')
+      gradient.addColorStop(0.52, '#b08968')
+      gradient.addColorStop(1, '#6b3f1d')
+    } else if (verseImageTheme === 'galilee') {
+      gradient.addColorStop(0, '#0f4c5c')
+      gradient.addColorStop(0.56, '#3ba7b8')
+      gradient.addColorStop(1, '#d3f3ff')
+    } else {
+      gradient.addColorStop(0, '#0f1115')
+      gradient.addColorStop(1, '#7c6319')
+    }
+
+    context.fillStyle = gradient
+    context.fillRect(0, 0, canvas.width, canvas.height)
+
+    if (selectedBackground?.objectUrl) {
+      try {
+        const backgroundImage = await loadImage(selectedBackground.objectUrl)
+        const scale = Math.max(canvas.width / backgroundImage.width, canvas.height / backgroundImage.height)
+        const drawWidth = backgroundImage.width * scale
+        const drawHeight = backgroundImage.height * scale
+        const offsetX = (canvas.width - drawWidth) / 2
+        const offsetY = (canvas.height - drawHeight) / 2
+        context.globalAlpha = 0.78
+        context.drawImage(backgroundImage, offsetX, offsetY, drawWidth, drawHeight)
+        context.globalAlpha = 1
+        context.fillStyle = 'rgba(8, 10, 16, 0.36)'
+        context.fillRect(0, 0, canvas.width, canvas.height)
+      } catch {
+        // Keep the generated background if the chosen image fails to load.
+      }
+    }
+
+    context.save()
+    context.globalAlpha = 0.16
+    if (verseImageTheme === 'desert' || verseImageTheme === 'temple') {
+      for (let index = 0; index < 5; index += 1) {
+        context.beginPath()
+        context.ellipse(540, 1020 + index * 44, 420 + index * 36, 90, 0, 0, Math.PI * 2)
+        context.fillStyle = index % 2 === 0 ? '#f3d19c' : '#9a6a38'
+        context.fill()
+      }
+    }
+    if (verseImageTheme === 'sea' || verseImageTheme === 'galilee') {
+      for (let index = 0; index < 6; index += 1) {
+        context.beginPath()
+        context.moveTo(0, 920 + index * 26)
+        context.quadraticCurveTo(240, 860 + index * 28, 540, 920 + index * 26)
+        context.quadraticCurveTo(820, 980 + index * 28, 1080, 920 + index * 26)
+        context.lineWidth = 10
+        context.strokeStyle = index % 2 === 0 ? '#d6f6ff' : '#7ed0e2'
+        context.stroke()
+      }
+    }
+    if (verseImageTheme === 'eden' || verseImageTheme === 'olive') {
+      for (let index = 0; index < 22; index += 1) {
+        context.beginPath()
+        context.ellipse(140 + index * 35, 120 + (index % 4) * 40, 18, 8, Math.PI / 4, 0, Math.PI * 2)
+        context.fillStyle = index % 2 === 0 ? '#d9f99d' : '#86efac'
+        context.fill()
+      }
+    }
+    if (verseImageTheme === 'midnight') {
+      for (let index = 0; index < 60; index += 1) {
+        context.beginPath()
+        context.arc((index * 173) % canvas.width, (index * 97) % 520, (index % 3) + 1, 0, Math.PI * 2)
+        context.fillStyle = index % 5 === 0 ? '#bfdbfe' : '#ffffff'
+        context.fill()
+      }
+    }
+    if (verseImageTheme === 'parchment') {
+      for (let index = 0; index < 180; index += 1) {
+        context.fillStyle = index % 2 === 0 ? 'rgba(91,67,32,0.06)' : 'rgba(255,248,220,0.04)'
+        context.fillRect((index * 61) % canvas.width, (index * 37) % canvas.height, 6, 6)
+      }
+    }
+    context.restore()
+
+    context.fillStyle = 'rgba(255,255,255,0.06)'
+    context.fillRect(56, 56, canvas.width - 112, canvas.height - 112)
+
+    context.fillStyle = '#f5d76e'
+    context.font = '600 32px JetBrains Mono'
+    context.fillText(selectedVerseLabel.toUpperCase(), 120, 180)
+
+    context.fillStyle = '#f8f5ed'
+    context.font = `400 64px ${selectedVerseImageFont.canvasFamily}`
+    const lines = wrapCanvasText(context, selectedVerseText, canvas.width - 240)
+    lines.forEach((line, index) => {
+      context.fillText(line, 120, 300 + index * 90)
+    })
+
+    context.fillStyle = 'rgba(248,245,237,0.72)'
+    context.font = `400 28px ${selectedVerseImageFont.brandFamily}`
+    context.fillText('Bibliosophia', 120, canvas.height - 140)
+
+    return canvas
+  }
+
+  async function openVerseImage() {
+    const canvas = await renderVerseImageCanvas()
+    if (!canvas) return
+
+    const dataUrl = canvas.toDataURL('image/png')
+    const popup = window.open('', '_blank', 'noopener,noreferrer')
+    if (!popup) {
+      setSaveState('Popup blocked. Try Download PNG instead.')
+      return
+    }
+
+    popup.document.write(`
+      <title>${selectedVerseLabel}</title>
+      <style>
+        body {
+          margin: 0;
+          min-height: 100vh;
+          display: grid;
+          place-items: center;
+          background: #0f1115;
+          color: #f8f5ed;
+          font-family: system-ui, sans-serif;
+          padding: 2rem;
+        }
+        img {
+          max-width: min(100%, 720px);
+          border-radius: 24px;
+          box-shadow: 0 20px 50px rgba(0,0,0,0.45);
+        }
+      </style>
+      <img alt="${selectedVerseLabel}" src="${dataUrl}" />
+    `)
+    popup.document.close()
+    setSaveState('PNG preview opened.')
+  }
+
+  async function downloadVerseImage() {
+    try {
+      const canvas = await renderVerseImageCanvas()
+      if (!canvas) return
+
+      const fileName = getDownloadFileName(selectedVerseLabel)
+      const startDownload = (href, revoke = null) => {
+        const link = document.createElement('a')
+        link.href = href
+        link.download = fileName
+        link.rel = 'noopener'
+        document.body.appendChild(link)
+        link.click()
+        link.remove()
+
+        if (revoke) {
+          window.setTimeout(revoke, 4000)
+        }
+      }
+
+      const blob = await canvasToPngBlob(canvas)
+      if (blob) {
+        if (lastImageUrlRef.current) URL.revokeObjectURL(lastImageUrlRef.current)
+        const url = URL.createObjectURL(blob)
+        lastImageUrlRef.current = url
+        startDownload(url, () => {
+          URL.revokeObjectURL(url)
+          if (lastImageUrlRef.current === url) {
+            lastImageUrlRef.current = ''
+          }
+        })
+      } else {
+        startDownload(canvas.toDataURL('image/png'))
+      }
+
+      setSaveState('PNG export started. If it is blocked here, use Open PNG.')
+    } catch (error) {
+      setSaveState(error instanceof Error ? `PNG export failed: ${error.message}` : 'PNG export failed. Use Open PNG.')
+    }
+  }
+
+  const handleAiSubmit = () => {
+    const question = aiQuestion.trim()
+    if (!question || !reading) return
+
+    setChatHistory((current) => [...current, { role: 'user', text: question }])
+    setAiQuestion('')
+
+    askReader({
+      question,
+      readingTitle: reading.title,
+      selectedEntry,
+    })
+      .then((payload) => {
+        setChatHistory((current) => [...current, { role: 'assistant', text: payload.answer }])
+      })
+      .catch(() => {
+        setChatHistory((current) => [
+          ...current,
+          { role: 'assistant', text: 'Error: Connection lost. The archives are currently unreachable.' },
+        ])
+      })
+  }
+
+  if (!reading) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: 'rgb(var(--c-bg))', color: 'rgb(var(--c-text))' }}>
+        Loading exegetical reader...
+      </div>
+    )
+  }
+
+  return (
+    <div className="uploaded-reader-page">
+      <style>{`
+        .theme-dock { display:none !important; }
+        .uploaded-reader-page {
+          min-height: 100vh;
+          position: relative;
+          overflow-x: hidden;
+          background: rgb(var(--c-bg));
+          color: rgb(var(--c-text));
+          font-family: var(--f-sans);
+        }
+        .uploaded-reader-page * { box-sizing: border-box; }
+        .uploaded-reader-page ::selection { background: rgba(var(--c-accent), 0.32); color: rgb(var(--c-bg)); }
+        .uploaded-reader-page ::-webkit-scrollbar { width: 6px; height: 6px; }
+        .uploaded-reader-page ::-webkit-scrollbar-track { background: rgb(var(--c-bg)); }
+        .uploaded-reader-page ::-webkit-scrollbar-thumb { background: rgba(var(--c-accent), 0.3); border-radius: 4px; }
+        .uploaded-reader-page .hide-scrollbars::-webkit-scrollbar { display: none; }
+        .uploaded-reader-page .hide-scrollbars { -ms-overflow-style: none; scrollbar-width: none; }
+        .reader-art-bg {
+          position: fixed;
+          inset: 0;
+          z-index: -2;
+          background: rgb(var(--c-bg));
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .reader-art-bg img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          mix-blend-mode: luminosity;
+          filter: grayscale(1) contrast(1.5);
+          opacity: 0.55;
+        }
+        .reader-mask {
+          position: fixed;
+          inset: 0;
+          z-index: -1;
+          pointer-events: none;
+          background: linear-gradient(135deg, rgba(var(--c-bg), 0.92), rgba(var(--c-bg), 0.42), rgba(var(--c-bg), 0.8));
+        }
+        .reader-grain {
+          position: fixed;
+          inset: 0;
+          z-index: 50;
+          pointer-events: none;
+          opacity: 0.14;
+          mix-blend-mode: overlay;
+          filter: contrast(1.15) brightness(0.95);
+          background-image: url("data:image/svg+xml,%3Csvg width='256' height='256' viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.2' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+          background-repeat: repeat;
+        }
+        .reader-vignette {
+          position: fixed;
+          inset: 0;
+          z-index: 51;
+          pointer-events: none;
+          box-shadow: inset 0 0 150px rgba(0,0,0,0.25);
+        }
+        .reader-top-nav {
+          position: fixed;
+          top: 0;
+          left: 0;
+          width: 100%;
+          z-index: 60;
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          justify-content: space-between;
+          gap: 1rem;
+          padding: 0.75rem 1.5rem;
+          background: rgba(var(--c-bg), 0.8);
+          backdrop-filter: blur(20px);
+          border-bottom: 1px solid rgba(var(--c-text), 0.1);
+        }
+        .nav-select {
+          appearance: none;
+          background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+          background-repeat: no-repeat;
+          background-position: right 0.5rem center;
+          background-size: 1em;
+          padding-right: 2rem !important;
+          border: 1px solid rgba(var(--c-text), 0.2);
+          border-radius: 0.35rem;
+          background-color: rgba(var(--c-bg), 0.9);
+          color: rgb(var(--c-text));
+          font-family: var(--f-mono);
+          font-size: 0.75rem;
+          padding: 0.4rem 0.65rem;
+        }
+        .nav-select.primary { color: rgb(var(--c-accent)); text-transform: uppercase; letter-spacing: 0.18em; }
+        .nav-select.translation { max-width: min(24rem, 90vw); }
+        .nav-row, .type-row { display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; }
+        .type-group {
+          display:flex; align-items:center; gap:.25rem;
+          border:1px solid rgba(var(--c-text),0.2); border-radius:.4rem;
+          padding:.25rem .5rem; background:rgba(255,255,255,0.05); backdrop-filter:blur(6px);
+          font-family:var(--f-mono); font-size:.75rem;
+        }
+        .type-label { color: rgba(var(--c-text), 0.4); text-transform: uppercase; letter-spacing: .16em; font-size: 9px; margin-right:.5rem; }
+        .type-btn {
+          width: 1.5rem; height:1.5rem; display:grid; place-items:center;
+          border-radius:.3rem; border:0; background:transparent; color:rgb(var(--c-text));
+        }
+        .type-btn:hover { background: rgba(255,255,255,0.08); color: rgb(var(--c-accent)); }
+        .reader-theme-ui {
+          position: fixed; bottom: 1.5rem; right: 1.5rem; z-index: 60;
+          display: flex; flex-direction: column; align-items: flex-end; gap: .75rem;
+        }
+        .reader-theme-panel {
+          background: rgba(var(--c-bg), 0.8);
+          backdrop-filter: blur(16px);
+          border: 1px solid rgba(var(--c-text), 0.2);
+          padding: .65rem;
+          border-radius: 999px;
+          box-shadow: 0 20px 40px rgba(0,0,0,0.32);
+          opacity: 0;
+          pointer-events: none;
+          transform: translateY(2rem);
+          transition: all .3s ease;
+          max-width: 85vw;
+          overflow-x: auto;
+        }
+        .reader-theme-panel.open { opacity:1; pointer-events:auto; transform: translateY(0); }
+        .reader-theme-list { display:flex; align-items:center; gap:.75rem; padding: 0 .25rem; }
+        .reader-theme-controls {
+          display:flex; align-items:center; gap:.25rem;
+          background: rgba(var(--c-bg), 0.8);
+          backdrop-filter: blur(16px);
+          border:1px solid rgba(var(--c-text),0.2);
+          padding:.35rem; border-radius:999px;
+          box-shadow:0 20px 40px rgba(0,0,0,0.32);
+        }
+        .reader-theme-button, .reader-mode-button {
+          width:2.5rem; height:2.5rem; display:grid; place-items:center;
+          border-radius:999px; border:0; background:transparent; color: rgb(var(--c-text));
+        }
+        .reader-mode-button { color: rgb(var(--c-accent)); }
+        .reader-theme-swatch {
+          position:relative; width:2rem; height:2rem; border-radius:999px; flex-shrink:0;
+          transition: all .3s ease; outline:none;
+        }
+        .reader-theme-swatch.active { transform: scale(1.1); z-index:10; }
+        .reader-theme-swatch:not(.active) { transform: scale(.9); opacity:.6; }
+        .reader-theme-swatch-inner { position:absolute; inset:2px; border-radius:999px; opacity:.8; }
+        .reader-main-shell {
+          padding: 8rem 1.5rem 5rem;
+          max-width: 88rem;
+          margin: 0 auto;
+          position: relative;
+          z-index: 10;
+        }
+        .reader-hero { max-width: 46rem; margin-bottom: 4rem; }
+        .reader-kickers { display:flex; flex-wrap:wrap; gap:.75rem; margin-bottom:1.5rem; }
+        .reader-chip {
+          font-family: var(--f-mono);
+          text-transform: uppercase;
+          letter-spacing: .2em;
+          font-size: 10px;
+          border: 1px solid rgba(var(--c-accent), 0.4);
+          padding: .35rem .55rem;
+          border-radius: .2rem;
+          background: rgba(var(--c-bg), 0.5);
+          color: rgb(var(--c-accent));
+        }
+        .reader-chip.muted {
+          color: rgba(var(--c-text), 0.7);
+          border-color: rgba(var(--c-text), 0.18);
+        }
+        .reader-book-title {
+          margin: 0 0 1.5rem;
+          font-family: var(--f-serif);
+          font-size: clamp(3.3rem, 8vw, 5.5rem);
+          line-height: 1.05;
+          font-weight: 500;
+          color: rgb(var(--c-text));
+          filter: drop-shadow(0 10px 18px rgba(0,0,0,0.2));
+        }
+        .reader-book-subtitle {
+          margin: 0;
+          font-family: var(--f-sans);
+          font-size: clamp(1.1rem, 2.5vw, 1.5rem);
+          line-height: 1.7;
+          color: rgba(var(--c-text), 0.6);
+          border-left: 2px solid rgb(var(--c-accent));
+          padding: .6rem 0 .6rem 1rem;
+          background: rgba(var(--c-bg), 0.3);
+          border-radius: 0 .5rem .5rem 0;
+        }
+        .reader-divider {
+          border-top: 1px solid rgba(var(--c-text), 0.2);
+          margin: 0 0 4rem;
+          box-shadow: 0 1px 0 rgba(255,255,255,0.04);
+        }
+        .reader-two-column {
+          display:grid;
+          grid-template-columns: minmax(0, 1fr);
+          gap: 3rem;
+          align-items:start;
+        }
+        @media (min-width: 1100px) {
+          .reader-two-column { grid-template-columns: minmax(0, 7fr) minmax(20rem, 5fr); }
+        }
+        .reading-column {
+          opacity: .95;
+          font-size: var(--user-font-size, 1.5rem);
+          line-height: var(--user-line-height, 1.8);
+        }
+        .verse-paragraph {
+          margin: 0 0 .9rem;
+          font-family: var(--f-sans);
+          color: rgba(var(--c-text), 0.92);
+          text-shadow: 0 2px 10px rgb(var(--c-bg));
+          scroll-margin-top: 8rem;
+          border-radius: .8rem;
+          padding: .35rem .5rem;
+          transition: background-color .2s ease, border-color .2s ease;
+          border: 1px solid transparent;
+        }
+        .verse-paragraph:hover {
+          background: rgba(255,255,255,0.03);
+        }
+        .verse-paragraph.selected-verse {
+          background: rgba(var(--c-accent), 0.12);
+          border-color: rgba(var(--c-accent), 0.3);
+        }
+        .verse-label {
+          display: block;
+          margin-bottom: 1rem;
+          font-family: var(--f-mono);
+          font-size: .875rem;
+          color: rgb(var(--c-accent));
+          letter-spacing: .18em;
+          text-transform: uppercase;
+        }
+        .verse-num {
+          font-feature-settings: "sups" 1;
+          vertical-align: super;
+          font-size: .7em;
+          margin-right: .2em;
+          opacity: .7;
+          color: rgb(var(--c-accent));
+          font-family: var(--f-mono);
+        }
+        .text-token {
+          transition: color .3s ease;
+          border-radius: 2px;
+          position: relative;
+          z-index: 20;
+          padding: 0 1px;
+        }
+        .lexicon-word {
+          cursor: pointer;
+          border-bottom: 2px solid rgba(var(--c-accent), 0.4);
+        }
+        .lexicon-word:hover {
+          color: rgb(var(--c-accent));
+          background: rgba(var(--c-accent), 0.2);
+          border-bottom-color: rgb(var(--c-accent));
+        }
+        .lexicon-word.locked {
+          border-bottom-style: dashed;
+          opacity: .82;
+        }
+        .reader-lock-panel {
+          display: grid;
+          gap: 1rem;
+          align-items: start;
+          color: rgba(var(--c-text), 0.68);
+          line-height: 1.65;
+        }
+        .reader-lock-panel p {
+          margin: 0;
+        }
+        .eink-marker {
+          background-image: linear-gradient(104deg, transparent 0%, transparent 2%, var(--highlight-color) 2.5%, var(--highlight-color) 97.5%, transparent 98%, transparent 100%);
+          background-size: 100% 85%;
+          background-repeat: no-repeat;
+          background-position: center 80%;
+          border-radius: 4px 10px 4px 10px;
+          box-decoration-break: clone;
+          -webkit-box-decoration-break: clone;
+        }
+        .reader-sidebar {
+          display:grid;
+          gap: 1.15rem;
+        }
+        @media (min-width: 1100px) {
+          .reader-sidebar { position: sticky; top: 6rem; }
+        }
+        .reader-card {
+          background:
+            linear-gradient(180deg, rgba(var(--c-surface), 0.72), rgba(var(--c-bg), 0.58));
+          backdrop-filter: blur(16px);
+          border: 1px solid rgba(var(--c-text), 0.12);
+          border-radius: .75rem;
+          padding: 1.15rem;
+          box-shadow: 0 22px 48px rgba(0,0,0,0.24);
+          position: relative;
+          overflow: hidden;
+        }
+        .reader-card::before {
+          content: '';
+          position:absolute;
+          top:0; left:0; width:100%; height:3px;
+          background: linear-gradient(90deg, rgba(var(--c-accent), 1), transparent);
+          opacity: .62;
+          border-radius: .75rem .75rem 0 0;
+        }
+        .reader-section-head {
+          display:flex;
+          justify-content:space-between;
+          align-items:flex-start;
+          gap:1rem;
+          margin-bottom: 1rem;
+        }
+        .reader-section-head.compact {
+          margin-bottom: .85rem;
+        }
+        .reader-section-kicker {
+          margin:0 0 .25rem;
+          font-family: var(--f-mono);
+          font-size: 9px;
+          color: rgba(var(--c-accent), .82);
+          text-transform: uppercase;
+          letter-spacing: .18em;
+        }
+        .reader-section-head h3 {
+          margin:0;
+          font-family: var(--f-serif);
+          font-size: 1.32rem;
+          line-height:1.12;
+          color: rgb(var(--c-text));
+          font-weight:500;
+        }
+        .reader-section-badge {
+          flex:0 0 auto;
+          border:1px solid rgba(var(--c-accent), .34);
+          border-radius:999px;
+          padding:.22rem .45rem;
+          color: rgb(var(--c-accent));
+          background: rgba(var(--c-accent), .08);
+          font-family: var(--f-mono);
+          font-size:8px;
+          letter-spacing:.12em;
+          text-transform:uppercase;
+        }
+        .card-heading {
+          font-family: var(--f-mono);
+          font-size: 11px;
+          color: rgb(var(--c-accent));
+          text-transform: uppercase;
+          letter-spacing: .2em;
+          margin: 0 0 1rem;
+          display:flex; align-items:center; gap:.5rem;
+        }
+        .card-heading::after {
+          content:'';
+          height:1px;
+          flex-grow:1;
+          background: rgba(var(--c-text), 0.2);
+        }
+        .lexicon-block {
+          display:grid;
+          gap: .95rem;
+          color: rgba(var(--c-text), 0.75);
+          font-family: var(--f-sans);
+          font-size: .95rem;
+          line-height: 1.65;
+        }
+        .lexicon-feature {
+          display:flex;
+          justify-content:space-between;
+          align-items:flex-start;
+          gap:1rem;
+          padding:.9rem;
+          border-radius:.65rem;
+          background: rgba(var(--c-bg), .36);
+          border:1px solid rgba(var(--c-text), .08);
+          box-shadow: inset 0 1px 0 rgba(var(--c-line), .04);
+        }
+        .lexicon-definition {
+          margin:0;
+          color: rgba(var(--c-text), .78);
+        }
+        .study-section {
+          border-top: 1px solid rgba(var(--c-text), 0.1);
+          padding-top: .9rem;
+          margin-top: .1rem;
+        }
+        .study-section:first-of-type {
+          border-top: 0;
+          padding-top: 0;
+          margin-top: 0;
+        }
+        .study-label {
+          margin: 0 0 .6rem;
+          font-family: var(--f-mono);
+          font-size: 10px;
+          color: rgba(var(--c-text), 0.5);
+          text-transform: uppercase;
+          letter-spacing: .16em;
+        }
+        .original-language-grid {
+          display:grid;
+          gap:.5rem;
+        }
+        .original-language-row,
+        .tooltip-language-row {
+          display:grid;
+          grid-template-columns: 5.5rem minmax(0, 1fr);
+          align-items:baseline;
+          gap:.35rem .75rem;
+          padding:.55rem .65rem;
+          border:1px solid rgba(var(--c-text),0.1);
+          border-radius:.55rem;
+          background: rgba(var(--c-bg),0.26);
+        }
+        .original-language-row span,
+        .tooltip-language-row span {
+          font-family: var(--f-mono);
+          font-size:9px;
+          color: rgba(var(--c-text),0.48);
+          letter-spacing:.16em;
+          text-transform:uppercase;
+        }
+        .original-language-row strong,
+        .tooltip-language-row strong {
+          min-width:0;
+          color: rgb(var(--c-text));
+          font-family: var(--f-serif);
+          font-size:1.08rem;
+          line-height:1.2;
+          overflow-wrap:anywhere;
+        }
+        .original-language-row em,
+        .tooltip-language-row em {
+          grid-column:2;
+          color: rgba(var(--c-text),0.58);
+          font-family: var(--f-mono);
+          font-size:.7rem;
+          font-style:normal;
+        }
+        .lexicon-entry-title {
+          font-family: var(--f-serif);
+          font-size: 1.55rem;
+          line-height:1;
+          color: rgb(var(--c-text));
+          display:block;
+          margin-bottom:.25rem;
+        }
+        .lexicon-strongs {
+          font-family: var(--f-mono);
+          font-size: 10px;
+          color: rgb(var(--c-accent));
+          border: 1px solid rgba(var(--c-accent), 0.4);
+          padding: 0 .25rem;
+          margin-left: .35rem;
+          background: rgba(var(--c-bg), 0.5);
+        }
+        .lexicon-translit {
+          font-family: 'Amiri', serif;
+          color: rgba(var(--c-text), .75);
+          font-style: italic;
+        }
+        .canonical-context {
+          border-left: 2px solid rgba(var(--c-accent), 0.5);
+          padding: .5rem 1rem;
+          background: rgba(var(--c-bg), 0.3);
+          border-radius: 0 .6rem .6rem 0;
+        }
+        .canonical-list { display:grid; gap: 1rem; margin:0; padding:0; list-style:none; }
+        .canonical-list li {
+          padding:.85rem;
+          border-radius:.65rem;
+          background: rgba(var(--c-bg), .32);
+          border:1px solid rgba(var(--c-text), .08);
+        }
+        .canonical-list strong { color: rgb(var(--c-accent)); font-family: var(--f-mono); font-size: .72rem; letter-spacing:.08em; text-transform:uppercase; }
+        .canonical-list em { display:block; margin-top:.4rem; color: rgba(var(--c-text), 0.68); font-size:.88rem; line-height:1.55; font-style:normal; }
+        .concordance-list {
+          display: grid;
+          gap: .65rem;
+          margin: 0;
+          padding: 0;
+          list-style: none;
+          max-height: 12rem;
+          overflow-y: auto;
+          padding-right: .35rem;
+        }
+        .concordance-list li {
+          padding:.65rem .75rem;
+          border-radius:.55rem;
+          background: rgba(var(--c-bg), .28);
+          border:1px solid rgba(var(--c-text), .07);
+        }
+        .concordance-ref {
+          color: rgb(var(--c-accent));
+          font-family: var(--f-mono);
+          font-size: 10px;
+          text-transform: uppercase;
+          letter-spacing: .12em;
+        }
+        .concordance-line {
+          color: rgba(var(--c-text), 0.74);
+          font-size: .88rem;
+          line-height: 1.55;
+          margin-top: .25rem;
+        }
+        .studio-card { height: min(480px, 70vh); display:flex; flex-direction:column; }
+        .studio-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; }
+        .profile-pill {
+          display:flex; align-items:center; gap:.5rem;
+          background: rgba(255,255,255,0.05);
+          padding:.3rem .5rem; border-radius:.4rem; border:1px solid rgba(var(--c-text),0.1);
+        }
+        .profile-dot {
+          width:1rem; height:1rem; border-radius:999px; display:grid; place-items:center;
+          background: rgba(var(--c-accent), 0.2); border:1px solid rgba(var(--c-accent), 0.5);
+          color: rgb(var(--c-accent)); font-family: var(--f-mono); font-size:8px;
+        }
+        .profile-label { font-family: var(--f-mono); font-size:9px; color: rgba(var(--c-text),0.7); text-transform:uppercase; letter-spacing:.14em; }
+        .studio-tabs { display:flex; gap:.35rem; border-bottom:1px solid rgba(var(--c-text),0.1); margin-bottom:1rem; }
+        .studio-tab {
+          flex:1;
+          padding:.58rem .45rem; border:1px solid transparent; background:rgba(var(--c-bg), .22); border-radius:.45rem .45rem 0 0;
+          color: rgba(var(--c-text),0.5); font-family: var(--f-mono); font-size:9px; text-transform:uppercase; letter-spacing:.1em;
+        }
+        .studio-tab.active { border-color: rgba(var(--c-accent), .26); border-bottom-color: rgb(var(--c-accent)); color: rgb(var(--c-accent)); background:rgba(var(--c-accent), .08); }
+        .studio-area { flex-grow:1; min-height:0; }
+        .notes-area, .ai-area, .analysis-area { height:100%; display:flex; flex-direction:column; min-height:0; }
+        .notes-textarea, .ai-input {
+          width:100%; background: rgba(255,255,255,0.05); border:1px solid rgba(var(--c-text),0.1);
+          border-radius:.4rem; padding:.8rem; color: rgb(var(--c-text)); font-family: var(--f-sans); font-size:.92rem;
+          outline:none;
+        }
+        .notes-textarea { flex-grow:1; resize:none; }
+        .notes-row { margin-top:.75rem; display:flex; justify-content:space-between; align-items:center; gap:.75rem; }
+        .notes-status { font-family: var(--f-mono); font-size:9px; color: rgba(var(--c-accent),0.7); transition: opacity .2s ease; opacity: ${saveState ? 1 : 0}; }
+        .save-btn {
+          font-family: var(--f-mono); font-size:10px; background: rgba(var(--c-accent),0.1); color: rgb(var(--c-accent));
+          border:1px solid rgba(var(--c-accent),0.3); padding:.45rem .8rem; border-radius:.35rem;
+        }
+        .chat-history { flex-grow:1; overflow-y:auto; margin-bottom:.75rem; display:grid; gap:.75rem; padding-right:.5rem; }
+        .chat-bubble {
+          background: rgba(255,255,255,0.05); padding:.8rem; border-radius:.6rem; border:1px solid rgba(var(--c-text),0.1);
+          color: rgba(var(--c-text),0.78); font-size:.92rem; line-height:1.6;
+        }
+        .chat-bubble .speaker { color: rgb(var(--c-accent)); font-family: var(--f-serif); display:block; margin-bottom:.35rem; }
+        .chat-bubble.user { background: rgba(var(--c-accent), 0.08); }
+        .ai-input-wrap { position:relative; }
+        .ai-send-btn {
+          position:absolute; right:.65rem; top:50%; transform:translateY(-50%);
+          border:0; background:transparent; color: rgba(var(--c-accent),0.7);
+        }
+        .analysis-placeholder {
+          height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;
+          opacity:.5; color: rgba(var(--c-text),0.7);
+        }
+        .analysis-content { display:grid; gap:1.25rem; overflow-y:auto; padding-right:.5rem; }
+        .analysis-header { display:flex; align-items:flex-end; gap:.75rem; margin-bottom:.35rem; }
+        .analysis-lemma { font-family: var(--f-serif); font-size:2rem; color: rgb(var(--c-accent)); }
+        .analysis-translit { font-family: var(--f-mono); font-size:.75rem; color: rgba(var(--c-text),0.55); font-style:italic; margin-bottom:.25rem; }
+        .analysis-def {
+          font-family: var(--f-sans); font-size:.9rem; line-height:1.7; color: rgba(var(--c-text),0.75);
+          border-left: 2px solid rgba(var(--c-text),0.2); padding-left:.75rem; margin-bottom:1rem;
+        }
+        .analysis-section { border-top:1px solid rgba(var(--c-text),0.1); padding-top:1rem; }
+        .analysis-language-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .analysis-subheading {
+          font-family: var(--f-mono); font-size:10px; color: rgba(var(--c-text),0.5); text-transform:uppercase; letter-spacing:.16em;
+          margin-bottom:.9rem; display:flex; align-items:center; gap:.5rem;
+        }
+        .analysis-subheading::after { content:''; height:1px; flex-grow:1; background: rgba(var(--c-text),0.1); }
+        .analysis-row { display:flex; align-items:center; gap:1.5rem; margin-bottom:.35rem; }
+        .analysis-ring-wrap { position:relative; width:7rem; height:7rem; flex-shrink:0; }
+        .analysis-ring-center {
+          position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; pointer-events:none;
+        }
+        .analysis-legend { flex-grow:1; display:grid; gap:.45rem; }
+        .analysis-legend-row { display:flex; justify-content:space-between; align-items:center; font-family: var(--f-mono); font-size:10px; }
+        .legend-label { display:flex; align-items:center; gap:.5rem; color: rgba(var(--c-text),0.7); }
+        .legend-dot { width:.5rem; height:.5rem; border-radius:999px; background: rgb(var(--c-accent)); }
+        .legend-value { color: rgb(var(--c-accent)); font-weight: 700; }
+        .analysis-tags { display:flex; flex-wrap:wrap; gap:.5rem; }
+        .analysis-tag {
+          font-family: var(--f-mono); font-size:10px; border:1px solid rgba(var(--c-accent),0.3); color: rgb(var(--c-accent));
+          background: rgba(var(--c-accent),0.1); padding:.35rem .55rem; border-radius:.2rem;
+        }
+        .reader-footer {
+          margin-top: 5rem; padding-top: 2rem; border-top:1px solid rgba(var(--c-text),0.2); text-align:center;
+          font-family: var(--f-mono); font-size: .75rem; color: rgba(var(--c-text),0.4); text-transform: uppercase; letter-spacing: .16em;
+        }
+        .lexicon-tooltip {
+          position: fixed; z-index: 100; max-width: 22rem; pointer-events:none;
+          background: rgba(var(--c-bg), 0.95); backdrop-filter: blur(20px);
+          border:1px solid rgba(var(--c-text),0.3); box-shadow:0 25px 50px rgba(0,0,0,0.35);
+          border-radius:.9rem; padding:1rem 1.1rem; color: rgb(var(--c-text));
+          opacity:0; transition: opacity .2s ease;
+        }
+        .lexicon-tooltip.visible { opacity: 1; }
+        .tooltip-header { display:flex; justify-content:space-between; align-items:flex-start; gap:.75rem; margin-bottom:.45rem; }
+        .tooltip-lemma { font-family: var(--f-serif); font-size:1.6rem; color: rgb(var(--c-accent)); }
+        .tooltip-translit { font-family: var(--f-mono); font-size:.7rem; color: rgba(var(--c-text),0.55); margin-left:.45rem; font-style: italic; }
+        .tooltip-strongs {
+          font-family: var(--f-mono); font-size:10px; border:1px solid rgba(var(--c-text),0.3);
+          padding:.2rem .4rem; border-radius:.25rem; background: rgba(var(--c-bg),0.5); color: rgba(var(--c-text),0.8);
+        }
+        .tooltip-divider { border-top:1px solid rgba(var(--c-text),0.2); margin:.75rem 0; }
+        .tooltip-copy { font-size:.9rem; line-height:1.65; color: rgba(var(--c-text),0.78); }
+        .tooltip-language-grid {
+          display:grid;
+          gap:.45rem;
+        }
+        .tooltip-language-row {
+          grid-template-columns: 4.8rem minmax(0, 1fr);
+          padding:.45rem .55rem;
+        }
+        .selection-menu {
+          position: fixed; z-index: 110; transform: translateX(-50%);
+          display:flex; align-items:center; gap:.6rem;
+          background: rgba(var(--c-bg), 0.95); backdrop-filter: blur(20px);
+          border:1px solid rgba(var(--c-text),0.2); padding:.6rem .7rem; border-radius:.7rem;
+          box-shadow:0 25px 50px rgba(0,0,0,0.3);
+          opacity:0; pointer-events:none; scale:.95; transition:all .2s ease;
+        }
+        .selection-menu.visible { opacity:1; pointer-events:auto; scale:1; }
+        .selection-color {
+          width:1.25rem; height:1.25rem; border-radius:999px; border:1px solid rgba(var(--c-text),0.15);
+        }
+        .selection-divider { width:1px; height:1.25rem; background: rgba(var(--c-text),0.2); margin: 0 .2rem; }
+        .selection-action {
+          display:flex; align-items:center; gap:.35rem; border:0; background:transparent;
+          color: rgba(var(--c-text),0.8); padding:.25rem .4rem; border-radius:.35rem;
+          font-family: var(--f-mono); font-size:10px; text-transform:uppercase; letter-spacing:.14em;
+        }
+        .selection-action:hover { background: rgba(255,255,255,0.08); }
+        .selection-clear { color: rgba(var(--c-text),0.4); }
+        .verse-action-bar {
+          position: fixed;
+          left: 50%;
+          bottom: 1.5rem;
+          transform: translateX(-50%);
+          width: min(92vw, 56rem);
+          z-index: 95;
+          display: grid;
+          gap: .85rem;
+          padding: 1rem 1.1rem;
+          background: rgba(var(--c-bg), 0.92);
+          backdrop-filter: blur(20px);
+          border: 1px solid rgba(var(--c-text), 0.12);
+          border-radius: 1rem;
+          box-shadow: 0 25px 50px rgba(0,0,0,0.35);
+        }
+        .verse-action-header {
+          display:flex;
+          align-items:center;
+          justify-content:space-between;
+          gap:1rem;
+          font-family: var(--f-mono);
+          font-size:10px;
+          text-transform: uppercase;
+          letter-spacing: .16em;
+          color: rgba(var(--c-text), 0.56);
+        }
+        .verse-action-header strong {
+          color: rgb(var(--c-text));
+          font-size: 11px;
+        }
+        .verse-action-buttons {
+          display:flex;
+          flex-wrap:wrap;
+          gap:.65rem;
+        }
+        .verse-action-button {
+          border: 1px solid rgba(var(--c-accent), 0.22);
+          border-radius: 999px;
+          background: rgba(255,255,255,0.03);
+          color: rgb(var(--c-text));
+          padding: .65rem .95rem;
+          font-family: var(--f-mono);
+          font-size: 10px;
+          letter-spacing: .14em;
+          text-transform: uppercase;
+        }
+        .verse-action-button.primary {
+          background: rgba(var(--c-accent), 0.12);
+          color: rgb(var(--c-accent));
+        }
+        .verse-share-menu {
+          display:flex;
+          flex-wrap:wrap;
+          gap:.55rem;
+        }
+        .verse-share-link {
+          border: 1px solid rgba(var(--c-text), 0.16);
+          border-radius: 999px;
+          padding: .55rem .8rem;
+          font-family: var(--f-mono);
+          font-size: 10px;
+          letter-spacing: .12em;
+          text-transform: uppercase;
+          color: rgba(var(--c-text), 0.86);
+          background: rgba(255,255,255,0.03);
+        }
+        .verse-share-link.primary-font {
+          border-color: rgba(var(--c-accent), 0.36);
+          color: rgb(var(--c-accent));
+          background: rgba(var(--c-accent), 0.1);
+        }
+        .resource-search-row {
+          display:grid;
+          gap:.7rem;
+        }
+        .resource-search-form {
+          display:flex;
+          gap:.6rem;
+          align-items:center;
+        }
+        .resource-source-row {
+          display:flex;
+          flex-wrap:wrap;
+          gap:.55rem;
+        }
+        .resource-search-input {
+          width:100%;
+          min-width:0;
+          border:1px solid rgba(var(--c-text),0.16);
+          border-radius:.9rem;
+          background: rgba(255,255,255,0.03);
+          color: rgb(var(--c-text));
+          padding:.8rem .9rem;
+          font-family: var(--f-sans);
+          font-size:.95rem;
+        }
+        .resource-links {
+          display:flex;
+          flex-wrap:wrap;
+          gap:.55rem;
+        }
+        .resource-help {
+          margin: 0;
+          font-family: var(--f-mono);
+          font-size: 10px;
+          letter-spacing: .12em;
+          text-transform: uppercase;
+          color: rgba(var(--c-text), 0.48);
+        }
+        .asset-browser-heading {
+          margin: 0;
+          font-family: var(--f-mono);
+          font-size: 10px;
+          letter-spacing: .16em;
+          text-transform: uppercase;
+          color: rgb(var(--c-accent));
+        }
+        .verse-image-modal {
+          position: fixed;
+          inset: 0;
+          z-index: 120;
+          display:grid;
+          place-items:center;
+          padding: 1.5rem;
+          background: rgba(0,0,0,0.45);
+          backdrop-filter: blur(12px);
+        }
+        .verse-image-panel {
+          width: min(96vw, 74rem);
+          max-height: min(92vh, 58rem);
+          background: rgba(var(--c-bg), 0.96);
+          border: 1px solid rgba(var(--c-text), 0.14);
+          border-radius: 1.2rem;
+          padding: 1rem;
+          box-shadow: 0 25px 60px rgba(0,0,0,0.42);
+          display:grid;
+          gap:1rem;
+          overflow:hidden;
+          grid-template-rows: minmax(0, 1fr);
+        }
+        .verse-image-layout {
+          display:grid;
+          grid-template-columns: minmax(0, 1.08fr) minmax(21rem, 0.92fr);
+          gap: 1rem;
+          min-height: 0;
+          height: 100%;
+        }
+        .verse-image-studio,
+        .verse-image-browser {
+          min-height: 0;
+          display:grid;
+          gap:1rem;
+          align-content:start;
+        }
+        .verse-image-browser {
+          border:1px solid rgba(var(--c-text),0.1);
+          border-radius:1rem;
+          background: rgba(255,255,255,0.02);
+          padding:1rem;
+          overflow:hidden;
+          display:flex;
+          flex-direction:column;
+          align-items:stretch;
+        }
+        .verse-image-preview {
+          min-height: 28rem;
+          border-radius: 1rem;
+          padding: 2rem;
+          display:flex;
+          flex-direction:column;
+          justify-content:space-between;
+          box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
+          background-size: cover;
+          background-position: center;
+        }
+        .verse-image-preview .label {
+          font-family: var(--f-mono);
+          font-size: 10px;
+          letter-spacing: .16em;
+          text-transform: uppercase;
+        }
+        .verse-image-preview .copy {
+          font-family: var(--f-serif);
+          font-size: clamp(2rem, 4vw, 2.9rem);
+          line-height: 1.26;
+          white-space: pre-wrap;
+        }
+        .verse-image-controls {
+          display:flex;
+          flex-wrap:wrap;
+          gap:.55rem;
+        }
+        .asset-grid {
+          display:grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap:.75rem;
+          flex: 1 1 auto;
+          overflow-y:auto;
+          padding-right:.2rem;
+          padding-bottom:.35rem;
+          min-height:0;
+          height:100%;
+          overscroll-behavior: contain;
+          -webkit-overflow-scrolling: touch;
+          touch-action: pan-y;
+        }
+        .asset-card {
+          border:1px solid rgba(var(--c-text),0.12);
+          border-radius:1rem;
+          padding:.55rem;
+          background: rgba(255,255,255,0.03);
+          display:grid;
+          gap:.55rem;
+          text-align:left;
+        }
+        .asset-card.active {
+          border-color: rgba(var(--c-accent), 0.38);
+          box-shadow: 0 0 0 1px rgba(var(--c-accent), 0.18);
+        }
+        .asset-thumb {
+          width:100%;
+          aspect-ratio:1 / 1;
+          object-fit:cover;
+          border-radius:.8rem;
+          display:block;
+          background: rgba(255,255,255,0.05);
+        }
+        .asset-title {
+          font-size:.82rem;
+          line-height:1.35;
+          color: rgba(var(--c-text), 0.85);
+          min-height:2.2rem;
+        }
+        .asset-source {
+          font-family: var(--f-mono);
+          font-size:9px;
+          letter-spacing:.12em;
+          text-transform:uppercase;
+          color: rgba(var(--c-text), 0.5);
+        }
+        .asset-empty {
+          min-height:20rem;
+          display:grid;
+          place-items:center;
+          text-align:center;
+          padding:1rem;
+          border:1px dashed rgba(var(--c-text),0.16);
+          border-radius:1rem;
+          color: rgba(var(--c-text), 0.6);
+        }
+        @media (max-width: 900px) {
+          .reader-top-nav { padding: .75rem 1rem; }
+          .reader-main-shell { padding: 9rem 1rem 4rem; }
+          .reader-theme-ui { right: 1rem; bottom: 1rem; }
+          .reader-book-title { font-size: 3.1rem; }
+          .verse-paragraph { font-size: calc(var(--user-font-size, 1.5rem) * .88); }
+          .reader-card, .module-shell { padding: 1.1rem; }
+          .selection-menu { gap:.45rem; }
+          .verse-action-bar { bottom: 1rem; width: min(94vw, 56rem); }
+          .verse-image-panel {
+            width: min(96vw, 42rem);
+            max-height: min(94vh, 62rem);
+            overflow-y:auto;
+          }
+          .verse-image-layout { grid-template-columns: minmax(0, 1fr); }
+        }
+      `}</style>
+
+      <div className="reader-art-bg">
+        <img
+          alt="Renaissance Art - Creation of Adam"
+          src="https://upload.wikimedia.org/wikipedia/commons/thumb/b/b4/Michelangelo_-_Creation_of_Adam_%28cropped%29.jpg/1280px-Michelangelo_-_Creation_of_Adam_%28cropped%29.jpg"
+        />
+      </div>
+      <div className="reader-mask" />
+      <div className="reader-grain" />
+      <div className="reader-vignette" />
+
+      <nav className="reader-top-nav">
+        <div className="nav-row">
+          <select
+            className="nav-select primary"
+            onChange={(event) => {
+              setBook(event.target.value)
+              setChapter(1)
+            }}
+            value={book}
+          >
+            {readingList.map((item) => (
+              <option key={item.book} value={item.book}>{item.book}</option>
+            ))}
+          </select>
+          <span style={{ color: 'rgba(var(--c-text),0.2)' }}>/</span>
+          <select className="nav-select" onChange={(event) => setChapter(Number(event.target.value))} value={chapter}>
+            {reading.availableChapters.map((chapterNumber) => (
+              <option key={chapterNumber} value={chapterNumber}>Ch. {chapterNumber}</option>
+            ))}
+          </select>
+          <span style={{ color: 'rgba(var(--c-text),0.2)' }}>/</span>
+          <select className="nav-select" onChange={(event) => setFocusVerse(Number(event.target.value))} value={focusVerse}>
+            {reading.verses.map((verse) => (
+              <option key={verse.number} value={verse.number}>v. {verse.number}</option>
+            ))}
+          </select>
+          <span style={{ color: 'rgba(var(--c-text),0.2)' }}>/</span>
+          <select
+            className="nav-select translation"
+            onChange={(event) => setTranslation(event.target.value)}
+            value={translation}
+          >
+            {FREE_BIBLE_TRANSLATIONS.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.label} · {item.language}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="type-row">
+          <div className="type-group">
+            <span className="type-label">Size</span>
+            <button className="type-btn" onClick={() => setFontScale((current) => Math.max(1, current - 0.125))} type="button">A-</button>
+            <button className="type-btn" onClick={() => setFontScale((current) => Math.min(2.5, current + 0.125))} type="button">A+</button>
+          </div>
+          <div className="type-group">
+            <span className="type-label">Space</span>
+            <button className="type-btn" onClick={() => setLineHeight((current) => Math.max(1.3, Number((current - 0.1).toFixed(2))))} type="button">↕-</button>
+            <button className="type-btn" onClick={() => setLineHeight((current) => Math.min(2.5, Number((current + 0.1).toFixed(2))))} type="button">↕+</button>
+          </div>
+        </div>
+      </nav>
+
+      <div className="reader-theme-ui">
+        <div className={`reader-theme-panel hide-scrollbars ${isThemePanelOpen ? 'open' : ''}`}>
+          <div className="reader-theme-list">
+            {themes.map((theme) => {
+              const palette = theme[mode]
+              const isActive = theme.id === themeName
+              return (
+                <button
+                  key={theme.id}
+                  className={`reader-theme-swatch ${isActive ? 'active' : ''}`}
+                  onClick={() => {
+                    setThemeName(theme.id)
+                    setIsThemePanelOpen(false)
+                  }}
+                  style={{
+                    backgroundColor: palette.bg,
+                    border: `2px solid ${isActive ? palette.accent : hexToRgba(palette.text, 0.2)}`,
+                  }}
+                  title={`${theme.name} | ${theme.fonts.heading.split(',')[0].replace(/['"]/g, '')}`}
+                  type="button"
+                >
+                  <div className="reader-theme-swatch-inner" style={{ background: `linear-gradient(135deg, ${palette.bg}, ${palette.accent})` }} />
+                </button>
+              )
+            })}
+          </div>
+        </div>
+        <div className="reader-theme-controls">
+          <button
+            className="reader-theme-button"
+            onClick={(event) => {
+              event.stopPropagation()
+              setIsThemePanelOpen((current) => !current)
+            }}
+            type="button"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><path d="M12 2a14.5 14.5 0 0 0 0 20" /><path d="M2 12h20" /></svg>
+          </button>
+          <div style={{ width: '1px', height: '1.25rem', background: 'rgba(var(--c-text),0.2)', margin: '0 .25rem' }} />
+          <button className="reader-mode-button" onClick={toggleMode} type="button">
+            {mode === 'night' ? (
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" /></svg>
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="5" /><line x1="12" y1="1" x2="12" y2="3" /><line x1="12" y1="21" x2="12" y2="23" /><line x1="4.22" y1="4.22" x2="5.64" y2="5.64" /><line x1="18.36" y1="18.36" x2="19.78" y2="19.78" /><line x1="1" y1="12" x2="3" y2="12" /><line x1="21" y1="12" x2="23" y2="12" /><line x1="4.22" y1="19.78" x2="5.64" y2="18.36" /><line x1="18.36" y1="5.64" x2="19.78" y2="4.22" /></svg>
+            )}
+          </button>
+        </div>
+      </div>
+
+      <main className="reader-main-shell">
+        <header className="reader-hero">
+          <div className="reader-kickers">
+            <span className="reader-chip">Canonical Text</span>
+            <span className="reader-chip muted">{reading.category}</span>
+            <span className="reader-chip muted">{reading.source?.translation || 'Free translation'}</span>
+          </div>
+          <h1 className="reader-book-title">{reading.title}</h1>
+          <p className="reader-book-subtitle">{reading.subtitle}</p>
+        </header>
+
+        <hr className="reader-divider" />
+
+        <div className="reader-two-column">
+          <article
+            ref={readingColumnRef}
+            className="reading-column"
+            id="reading-column"
+            onMouseUp={handleSelection}
+            onTouchEnd={handleSelection}
+            style={{ '--user-font-size': `${fontScale}rem`, '--user-line-height': lineHeight }}
+          >
+            {reading.verses.map((verse, verseIndex) => (
+              <p
+                className={`verse-paragraph ${selectedVerseNumbers.includes(verse.number) ? 'selected-verse' : ''}`}
+                key={verse.number}
+                onClick={(event) => {
+                  const selection = window.getSelection()
+                  if (selection && !selection.isCollapsed) {
+                    return
+                  }
+                  handleVerseSelect(verse.number, event.shiftKey)
+                }}
+              >
+                {verseIndex === 0 ? <span className="verse-label">Chapter {chapter}</span> : null}
+                <span className="verse-num">{verse.number}</span>
+                {splitText(verse.text).map((token, tokenIndex) => {
+                  const clean = cleanWord(token)
+                  const tokenId = `t-${verse.number}-${tokenIndex}`
+                  const entry = WORD_STUDY_LIBRARY[clean] || currentWordStudyLibrary[clean]
+                  const highlightColor = highlightedTokens[tokenId]
+
+                  if (token.trim() === '' || /^[.,;:?!]+$/.test(token)) {
+                    return (
+                      <span
+                        className={`text-token ${highlightColor ? 'eink-marker' : ''}`}
+                        key={tokenId}
+                        ref={(node) => {
+                          tokenRefs.current[tokenId] = node
+                        }}
+                        style={highlightColor ? { '--highlight-color': highlightColor } : undefined}
+                      >
+                        {token}
+                      </span>
+                    )
+                  }
+
+                  return (
+                    <span
+                      className={`text-token ${studyToolsUnlocked ? 'lexicon-word' : 'lexicon-word locked'} ${highlightColor ? 'eink-marker' : ''}`}
+                      data-word={clean}
+                      key={tokenId}
+                      ref={(node) => {
+                        tokenRefs.current[tokenId] = node
+                      }}
+                      style={highlightColor ? { '--highlight-color': highlightColor } : undefined}
+                      onClick={(event) => {
+                        handleVerseSelect(verse.number, event.shiftKey)
+                        if (!studyToolsUnlocked) {
+                          openSignupForStudyTools()
+                          return
+                        }
+                        setSelectedWordKey(clean)
+                        setTab('analysis')
+                      }}
+                      onMouseEnter={(event) => {
+                        if (!studyToolsUnlocked || !entry) return
+                        const rect = event.currentTarget.getBoundingClientRect()
+                        setTooltip({
+                          entry,
+                          left: Math.min(rect.left, window.innerWidth - 360),
+                          top: rect.bottom + 10,
+                        })
+                      }}
+                      onMouseLeave={() => setTooltip(null)}
+                    >
+                      {token}
+                    </span>
+                  )
+                })}
+              </p>
+            ))}
+          </article>
+
+          <aside className="reader-sidebar">
+            <div className="reader-card study-tools-card">
+              <div className="reader-section-head">
+                <div>
+                  <p className="reader-section-kicker">Signed-up Study Tools</p>
+                  <h3>Dictionary & Concordance</h3>
+                </div>
+                <span className="reader-section-badge">{studyToolsUnlocked ? 'Unlocked' : 'Locked'}</span>
+              </div>
+              {studyToolsUnlocked ? (
+                <div className="lexicon-block">
+                  {selectedEntry ? (
+                    <>
+                      <div className="lexicon-feature">
+                        <div>
+                          <p className="study-label">Dictionary</p>
+                          <strong className="lexicon-entry-title">{selectedEntry.lemma}</strong>
+                          <span className="lexicon-translit">{selectedEntry.translit}</span>
+                        </div>
+                        <span className="lexicon-strongs">{selectedEntry.strongs}</span>
+                      </div>
+                      <p className="lexicon-definition">{selectedEntry.def}</p>
+
+                      <div className="study-section">
+                        <p className="study-label">Glossary</p>
+                        <div>{getGlossaryLine(selectedEntry)}</div>
+                      </div>
+
+                      <div className="study-section">
+                        <p className="study-label">Original Languages</p>
+                        <div className="original-language-grid">
+                          {getOriginalLanguageRows(selectedEntry).map((row) => (
+                            <div className="original-language-row" key={row.label}>
+                              <span>{row.label}</span>
+                              <strong>{row.value}</strong>
+                              {row.translit ? <em>{row.translit}</em> : null}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="study-section">
+                        <p className="study-label">Biblical Dictionary</p>
+                        <div>{selectedEntry.biblicalNote}</div>
+                      </div>
+
+                      <div className="study-section">
+                        <p className="study-label">Concordance</p>
+                        <ul className="concordance-list hide-scrollbars">
+                          {selectedEntry.concordance?.slice(0, 8).map((occurrence, index) => (
+                            <li key={`${occurrence.book}-${occurrence.chapter}-${occurrence.verse}-${index}`}>
+                              <div className="concordance-ref">{occurrence.book} {occurrence.chapter}:{occurrence.verse}</div>
+                              <div className="concordance-line">{occurrence.excerpt}</div>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </>
+                  ) : null}
+                </div>
+              ) : (
+                <div className="reader-lock-panel">
+                  <strong>Unlock word study</strong>
+                  <p>Sign up to use the Dictionary, Biblical Dictionary, and Concordance tools.</p>
+                  <button className="save-btn" onClick={openSignupForStudyTools} type="button">Sign Up</button>
+                </div>
+              )}
+            </div>
+
+            {studyToolsUnlocked ? (
+              <div className="reader-card commentary-card">
+                <div className="reader-section-head compact">
+                  <div>
+                    <p className="reader-section-kicker">Passage Notes</p>
+                    <h3>Commentaries</h3>
+                  </div>
+                </div>
+                <ul className="canonical-list">
+                  {reading.crossRefs.map((crossRef) => (
+                    <li key={crossRef.ref}>
+                      <strong>{crossRef.ref}</strong>
+                      <em>{crossRef.note}</em>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <div className="reader-card commentary-card reader-lock-panel">
+                <div className="reader-section-head compact">
+                  <div>
+                    <p className="reader-section-kicker">Passage Notes</p>
+                    <h3>Commentaries</h3>
+                  </div>
+                  <span className="reader-section-badge">Locked</span>
+                </div>
+                <p>Sign up to unlock passage commentaries and canonical cross-reference notes.</p>
+                <button className="save-btn" onClick={openSignupForStudyTools} type="button">Sign Up</button>
+              </div>
+            )}
+
+            <div className="reader-card studio-card">
+              <div className="studio-header">
+                <div className="reader-section-head compact" style={{ marginBottom: 0 }}>
+                  <div>
+                    <p className="reader-section-kicker">Workspace</p>
+                    <h3>Study Studio</h3>
+                  </div>
+                </div>
+                <div className="profile-pill">
+                  <div className="profile-dot">S</div>
+                  <span className="profile-label">Profile</span>
+                </div>
+              </div>
+
+              <div className="studio-tabs">
+                {TAB_OPTIONS.map((option) => (
+                  <button
+                    className={`studio-tab ${tab === option.id ? 'active' : ''}`}
+                    key={option.id}
+                    onClick={() => setTab(option.id)}
+                    type="button"
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="studio-area">
+                {tab === 'notes' ? (
+                  <div className="notes-area">
+                    <textarea
+                      className="notes-textarea hide-scrollbars"
+                      id="personal-notes"
+                      onChange={(event) => setNotes(event.target.value)}
+                      placeholder="Record your theological reflections, structural observations, and cross-references here..."
+                      value={notes}
+                    />
+                    <div className="notes-row">
+                      <span className="notes-status">{saveState || ' '}</span>
+                      <button className="save-btn" id="save-notes-btn" onClick={saveNotesNow} type="button">Save Notes</button>
+                    </div>
+                  </div>
+                ) : null}
+
+                {tab === 'ai' ? (
+                  <div className="ai-area">
+                    <div className="chat-history hide-scrollbars" id="ai-chat-history">
+                      {chatHistory.map((message, index) => (
+                        <div className={`chat-bubble ${message.role === 'user' ? 'user' : ''}`} key={`${message.role}-${index}`}>
+                          <span className="speaker">{message.role === 'user' ? 'You' : 'Bibliosophia AI'}</span>
+                          <div style={{ whiteSpace: 'pre-wrap' }}>{message.text}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="ai-input-wrap">
+                      <input
+                        className="ai-input"
+                        id="ai-input"
+                        onChange={(event) => setAiQuestion(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') handleAiSubmit()
+                        }}
+                        placeholder="Query the text..."
+                        type="text"
+                        value={aiQuestion}
+                      />
+                      <button className="ai-send-btn" id="ai-send-btn" onClick={handleAiSubmit} type="button">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></svg>
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+
+                {tab === 'analysis' ? (
+                  <div className="analysis-area">
+                    {!studyToolsUnlocked ? (
+                      <div className="analysis-placeholder">
+                        <p>Sign up to unlock Word Analysis, Dictionary data, Concordance references, and Commentaries.</p>
+                        <button className="save-btn" onClick={openSignupForStudyTools} type="button">Sign Up</button>
+                      </div>
+                    ) : selectedEntry ? (
+                      <div className="analysis-content hide-scrollbars">
+                        <div>
+                          <div className="analysis-header">
+                            <h4 className="analysis-lemma">{selectedEntry.lemma}</h4>
+                            <span className="analysis-translit">{selectedEntry.translit}</span>
+                            <span className="lexicon-strongs" style={{ marginLeft: 'auto' }}>{selectedEntry.strongs}</span>
+                          </div>
+                          <p className="analysis-def">{selectedEntry.def}</p>
+                        </div>
+
+                        <div className="analysis-section">
+                          <h5 className="analysis-subheading">Original Languages</h5>
+                          <div className="original-language-grid analysis-language-grid">
+                            {getOriginalLanguageRows(selectedEntry).map((row) => (
+                              <div className="original-language-row" key={row.label}>
+                                <span>{row.label}</span>
+                                <strong>{row.value}</strong>
+                                {row.translit ? <em>{row.translit}</em> : null}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="analysis-section">
+                          <h5 className="analysis-subheading">Canonical Distribution</h5>
+                          <div className="analysis-row">
+                            <div className="analysis-ring-wrap">
+                              <svg aria-hidden="true" viewBox="0 0 100 100" style={{ width: '100%', height: '100%', transform: 'rotate(-90deg)', filter: 'drop-shadow(0 8px 18px rgba(0,0,0,.25))' }}>
+                                <circle cx="50" cy="50" fill="transparent" r="36" stroke="rgba(255,255,255,0.05)" strokeWidth="14" />
+                                {donutSegments.map((segment, index) => (
+                                  <circle
+                                    cx="50"
+                                    cy="50"
+                                    fill="transparent"
+                                    key={segment.label}
+                                    r="36"
+                                    stroke="rgba(var(--c-accent),1)"
+                                    strokeDasharray={segment.strokeDasharray}
+                                    strokeDashoffset={segment.strokeDashoffset}
+                                    strokeLinecap="round"
+                                    strokeWidth="14"
+                                    style={{ opacity: [1, 0.8, 0.6, 0.4, 0.2][index % 5] }}
+                                  />
+                                ))}
+                              </svg>
+                              <div className="analysis-ring-center">
+                                <span style={{ color: 'rgb(var(--c-text))', fontFamily: 'var(--f-serif)', fontSize: '1.2rem' }}>{selectedEntry.freq}</span>
+                                <span style={{ fontSize: '8px', color: 'rgba(var(--c-text),0.5)', fontFamily: 'var(--f-mono)', textTransform: 'uppercase', letterSpacing: '.16em' }}>Total</span>
+                              </div>
+                            </div>
+                            <div className="analysis-legend">
+                              {selectedEntry.distribution.map((segment, index) => (
+                                <div className="analysis-legend-row" key={segment.label}>
+                                  <div className="legend-label">
+                                    <span className="legend-dot" style={{ opacity: [1, 0.8, 0.6, 0.4, 0.2][index % 5] }} />
+                                    <span>{segment.label}</span>
+                                  </div>
+                                  <span className="legend-value">{segment.value}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="analysis-section">
+                          <h5 className="analysis-subheading">Key Occurrences</h5>
+                          <div className="analysis-tags">
+                            {selectedEntry.topVerses.map((verse, index) => (
+                              <span className="analysis-tag" key={`${verse}-${index}`}>{verse}</span>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="analysis-placeholder">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" style={{ marginBottom: '0.75rem', color: 'rgb(var(--c-accent))' }}><path d="M2 12h10l2-9 4 18 2-9h4" /></svg>
+                        <p>Click any highlighted word in the text<br />to view deep analytical data.</p>
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </aside>
+        </div>
+
+        <footer className="reader-footer">
+          Bibliosophia Exegetical Engine · Text: KJV · Lexicon: Strong&apos;s Exhaustive
+        </footer>
+      </main>
+
+      {selectedVerses.length ? (
+        <div className="verse-action-bar" id="verse-share-menu">
+          <div className="verse-action-header">
+            <span>Currently Selected</span>
+            <strong>{selectedVerseLabel}</strong>
+          </div>
+
+          <div className="verse-action-buttons">
+            <button className="verse-action-button" onClick={() => highlightSelectedVerses()} type="button">
+              Highlight
+            </button>
+            <button className="verse-action-button" onClick={copySelectedVerses} type="button">
+              Copy
+            </button>
+            <button className="verse-action-button" onClick={openStudyForSelectedVerses} type="button">
+              Study
+            </button>
+            <button className="verse-action-button" onClick={shareSelectedVerses} type="button">
+              Share
+            </button>
+            <button className="verse-action-button primary" onClick={() => setImageModalOpen(true)} type="button">
+              Image
+            </button>
+            <button className="verse-action-button" onClick={clearVerseSelection} type="button">
+              Clear
+            </button>
+          </div>
+
+          <div className="verse-share-menu">
+            {shareTargets.map((target) => (
+              <button className="verse-share-link" key={target.label} onClick={target.action} type="button">
+                {target.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {imageModalOpen && selectedVerses.length ? (
+        <div
+          aria-modal="true"
+          className="verse-image-modal"
+          id="verse-image-modal"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setImageModalOpen(false)
+              setSaveState('Image studio closed.')
+            }
+          }}
+          role="dialog"
+        >
+          <div className="verse-image-panel">
+            <div className="verse-image-layout">
+              <div className="verse-image-studio">
+                <div
+                  className="verse-image-preview"
+                  style={{ ...verseImagePreviewStyle, color: verseImagePalette.text }}
+                >
+                  <div className="label" style={{ color: verseImagePalette.accent }}>{selectedVerseLabel}</div>
+                  <div className="copy" style={{ fontFamily: selectedVerseImageFont.previewFamily }}>{selectedVerseText}</div>
+                  <div className="label" style={{ color: verseImagePalette.accent, fontFamily: selectedVerseImageFont.brandFamily }}>Bibliosophia</div>
+                </div>
+
+                <div className="verse-image-controls">
+                  <button className="verse-action-button" onClick={() => applyVerseImageTheme('current')} type="button">Current</button>
+                  <button className="verse-action-button" onClick={() => applyVerseImageTheme('sunrise')} type="button">Sunrise</button>
+                  <button className="verse-action-button" onClick={() => applyVerseImageTheme('midnight')} type="button">Midnight</button>
+                  <button className="verse-action-button" onClick={() => applyVerseImageTheme('olive')} type="button">Olive</button>
+                  <button className="verse-action-button" onClick={() => applyVerseImageTheme('eden')} type="button">Eden</button>
+                  <button className="verse-action-button" onClick={() => applyVerseImageTheme('temple')} type="button">Temple</button>
+                  <button className="verse-action-button" onClick={() => applyVerseImageTheme('galilee')} type="button">Galilee</button>
+                  <button className="verse-action-button" onClick={() => applyVerseImageTheme('desert')} type="button">Desert</button>
+                  <button className="verse-action-button" onClick={() => applyVerseImageTheme('sea')} type="button">Sea</button>
+                  <button className="verse-action-button" onClick={() => applyVerseImageTheme('parchment')} type="button">Parchment</button>
+                  <button className="verse-action-button" onClick={() => applyVerseImageTheme('cedar')} type="button">Cedar</button>
+                  <button className="verse-action-button" onClick={() => applyVerseImageTheme('linen')} type="button">Linen</button>
+                  <button className="verse-action-button" onClick={() => applyVerseImageTheme('wilderness')} type="button">Wilderness</button>
+                  <button className="verse-action-button" onClick={() => applyVerseImageTheme('goldleaf')} type="button">Gold Leaf</button>
+                </div>
+
+                <div className="resource-search-row">
+                  <p className="resource-help">Choose a font for the preview and PNG export.</p>
+                  <div className="resource-links">
+                    {VERSE_IMAGE_FONTS.map((font) => (
+                      <button
+                        className={`verse-share-link ${verseImageFont === font.id ? 'primary-font' : ''}`}
+                        key={font.id}
+                        onClick={() => setVerseImageFont(font.id)}
+                        style={{ fontFamily: font.previewFamily }}
+                        type="button"
+                      >
+                        {font.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="verse-action-buttons">
+                  <button className="verse-action-button primary" onClick={downloadVerseImage} type="button">
+                    Download PNG
+                  </button>
+                  <button className="verse-action-button" onClick={openVerseImage} type="button">
+                    Open PNG
+                  </button>
+                  {selectedBackground ? (
+                    <button
+                      className="verse-action-button"
+                      onClick={() => clearSelectedBackground('Custom image cleared.')}
+                      type="button"
+                    >
+                      Clear Image
+                    </button>
+                  ) : null}
+                  <button className="verse-action-button" onClick={() => setImageModalOpen(false)} type="button">
+                    Close
+                  </button>
+                </div>
+              </div>
+
+              <aside className="verse-image-browser">
+                <h3 className="asset-browser-heading">Background Search</h3>
+                <div className="resource-search-row">
+                  <div className="resource-source-row">
+                    {availableImageSearchSources.map((source) => (
+                      <button
+                        className={`verse-share-link ${backgroundSearchSource === source.id ? 'primary-font' : ''}`}
+                        key={source.id}
+                        onClick={() => setBackgroundSearchSource(source.id)}
+                        type="button"
+                      >
+                        {source.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="resource-search-form">
+                    <input
+                      className="resource-search-input"
+                      onChange={(event) => setBackgroundSearchQuery(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault()
+                          searchBackgroundResources()
+                        }
+                      }}
+                      placeholder="Search free/public-domain backgrounds, e.g. olive grove, ancient manuscript, sea of galilee"
+                      type="text"
+                      value={backgroundSearchQuery}
+                    />
+                    <button className="verse-action-button primary" onClick={searchBackgroundResources} type="button">
+                      Search
+                    </button>
+                  </div>
+                  <p className="resource-help">Studio gives you curated built-in backgrounds first. Results are filtered to keep out NSFW or explicit imagery.</p>
+                  <p className="resource-help">Unsplash, Pexels, and Pixabay are the best external sources once their free secure keys are configured. Wikimedia and Openverse remain secondary fallbacks.</p>
+                </div>
+
+                {backgroundSearchStatus === 'loading' ? (
+                  <div className="asset-empty">Searching free artwork and photography...</div>
+                ) : null}
+
+                {backgroundSearchStatus !== 'loading' && backgroundSearchResults.length > 0 ? (
+                  <div className="asset-grid hide-scrollbars">
+                    {backgroundSearchResults.map((result) => (
+                      <button
+                        className={`asset-card ${selectedBackground?.id === result.id ? 'active' : ''}`}
+                        key={result.id}
+                        onClick={() => applyBackgroundResult(result)}
+                        type="button"
+                      >
+                        <img alt={result.title} className="asset-thumb" src={result.thumb} />
+                        <div className="asset-title">{result.title}</div>
+                        <div className="asset-source">{result.source}</div>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+
+                {backgroundSearchStatus !== 'loading' && backgroundSearchResults.length === 0 ? (
+                  <div className="asset-empty">
+                    {backgroundSearchError || 'Search for a biblical scene or atmosphere to load free background choices here.'}
+                  </div>
+                ) : null}
+              </aside>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      <div
+        className={`lexicon-tooltip ${tooltip ? 'visible' : ''}`}
+        style={tooltip ? { left: tooltip.left, top: tooltip.top } : { left: -9999, top: -9999 }}
+      >
+        {tooltip ? (
+          <>
+            <div className="tooltip-header">
+              <div>
+                <span className="tooltip-lemma">{tooltip.entry.lemma}</span>
+                <span className="tooltip-translit">{tooltip.entry.translit}</span>
+              </div>
+              <span className="tooltip-strongs">{tooltip.entry.strongs}</span>
+            </div>
+            <div className="tooltip-divider" />
+            <p className="tooltip-copy">
+              <strong style={{ color: 'rgb(var(--c-text))' }}>Definition:</strong> {tooltip.entry.def}
+            </p>
+            <p className="tooltip-copy">
+              <strong style={{ color: 'rgb(var(--c-text))' }}>Glossary:</strong> {getGlossaryLine(tooltip.entry)}
+            </p>
+            {getOriginalLanguageRows(tooltip.entry).length ? (
+              <>
+                <div className="tooltip-divider" />
+                <div className="tooltip-language-grid">
+                  {getOriginalLanguageRows(tooltip.entry).map((row) => (
+                    <div className="tooltip-language-row" key={row.label}>
+                      <span>{row.label}</span>
+                      <strong>{row.value}</strong>
+                      {row.translit ? <em>{row.translit}</em> : null}
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : null}
+            {tooltip.entry.concordance?.length ? (
+              <>
+                <div className="tooltip-divider" />
+                <p className="tooltip-copy">
+                  <strong style={{ color: 'rgb(var(--c-text))' }}>Concordance:</strong>{' '}
+                  {tooltip.entry.concordance
+                    .slice(0, 3)
+                    .map((occurrence) => `${occurrence.book} ${occurrence.chapter}:${occurrence.verse}`)
+                    .join(' · ')}
+                </p>
+              </>
+            ) : null}
+          </>
+        ) : null}
+      </div>
+
+      <div
+        className={`selection-menu ${selectionMenu.open ? 'visible' : ''}`}
+        id="selection-menu"
+        style={{ left: selectionMenu.x, top: selectionMenu.y }}
+      >
+        {HIGHLIGHT_OPTIONS.map((option) => (
+          <button
+            className="selection-color"
+            key={option.id}
+            onClick={() => applyHighlight(option.color)}
+            style={{ background: option.color }}
+            title={option.id}
+            type="button"
+          />
+        ))}
+        <div
+          className="selection-color"
+          style={{
+            overflow: 'hidden',
+            position: 'relative',
+            background: 'linear-gradient(135deg, white, gray)',
+          }}
+          title="Custom Color"
+        >
+          <input
+            onChange={applyCustomHighlight}
+            style={{ position: 'absolute', inset: '-8px', width: '32px', height: '32px', opacity: 0, cursor: 'pointer' }}
+            type="color"
+          />
+        </div>
+        <div className="selection-divider" />
+        <button className="selection-action" onClick={createNoteFromSelection} type="button">
+          Note
+        </button>
+        <div className="selection-divider" />
+        <button className="selection-action selection-clear" onClick={clearHighlight} type="button">
+          ×
+        </button>
+      </div>
+      {authDialogFeature ? (
+        <AuthDialog featureName={authDialogFeature} onClose={() => setAuthDialogFeature('')} />
+      ) : null}
+    </div>
+  )
+}
+
+function normalizeHighlights(highlights) {
+  if (!highlights || typeof highlights !== 'object') return {}
+
+  const normalized = {}
+
+  Object.entries(highlights).forEach(([key, value]) => {
+    if (typeof value === 'string') {
+      normalized[key] = value
+    } else if (value === true) {
+      normalized[key] = 'rgba(var(--c-accent), 0.4)'
+    }
+  })
+
+  return normalized
+}
+
+export default BibleReaderPage
