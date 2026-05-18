@@ -29,6 +29,13 @@ const MENU_CONFIG = [
   { id: 'DATA', glyph: 'Ω', desc: 'User Archives', x: 350, y: 150, mod: 'mod-data' },
 ]
 
+const MOBILE_MENU_POSITIONS = [
+  { x: -92, y: 104 },
+  { x: 92, y: 104 },
+  { x: -92, y: 274 },
+  { x: 92, y: 274 },
+]
+
 function HomePage({ initialModule = null }) {
   const navigate = useNavigate()
   const { mode, themeName, themes, toggleMode, setThemeName } = useTheme()
@@ -45,6 +52,8 @@ function HomePage({ initialModule = null }) {
   const galaxyTimeRef = useRef(0)
   const activeModuleRef = useRef(null)
   const isWarpedRef = useRef(false)
+  const isLiteSceneRef = useRef(false)
+  const lastLiteFrameTimeRef = useRef(0)
   const rafRef = useRef(0)
 
   const [isThemePanelOpen, setIsThemePanelOpen] = useState(false)
@@ -122,14 +131,22 @@ function HomePage({ initialModule = null }) {
     const galaxy = galaxyRef.current
     if (!galaxy) return undefined
 
+    isLiteSceneRef.current = window.matchMedia(
+      '(max-width: 900px), (pointer: coarse), (prefers-reduced-motion: reduce)',
+    ).matches
+    const isLiteScene = isLiteSceneRef.current
+
     galaxy.innerHTML = ''
     nodeDataRef.current = []
     ringDataRef.current = []
 
-    for (let ringIndex = 0; ringIndex < 6; ringIndex += 1) {
+    const ringCount = isLiteScene ? 2 : 6
+    const letterCount = isLiteScene ? 28 : 150
+
+    for (let ringIndex = 0; ringIndex < ringCount; ringIndex += 1) {
       const ring = document.createElement('div')
       ring.className = 'uploaded-astrolabe-ring'
-      const size = 800 + ringIndex * 600
+      const size = isLiteScene ? 260 + ringIndex * 180 : 800 + ringIndex * 600
       ring.style.width = `${size}px`
       ring.style.height = `${size}px`
       galaxy.appendChild(ring)
@@ -146,9 +163,10 @@ function HomePage({ initialModule = null }) {
       })
     }
 
-    MENU_CONFIG.forEach((config) => {
+    MENU_CONFIG.forEach((config, index) => {
+      const mobilePosition = MOBILE_MENU_POSITIONS[index] || { x: 0, y: 0 }
       const wrapper = document.createElement('div')
-      wrapper.className = 'glyph-wrapper is-menu'
+      wrapper.className = `glyph-wrapper is-menu${isLiteScene ? ' active' : ''}`
 
       const inner = document.createElement('div')
       inner.className = 'glyph-inner menu-inner'
@@ -170,10 +188,10 @@ function HomePage({ initialModule = null }) {
       nodeDataRef.current.push({
         el: wrapper,
         isMenu: true,
-        menu: config,
+        menu: isLiteScene ? { ...config, ...mobilePosition } : config,
         baseX: 0,
         baseY: 0,
-        baseZ: -3000,
+        baseZ: isLiteScene ? 150 : -3000,
         rx: Math.random() * 360,
         ry: Math.random() * 360,
         rz: Math.random() * 360,
@@ -182,8 +200,8 @@ function HomePage({ initialModule = null }) {
     })
 
     let pureLetters = activeVerse.v.replace(/[^a-zA-Z]/g, '').split('')
-    while (pureLetters.length < 150) pureLetters = pureLetters.concat(pureLetters)
-    pureLetters = pureLetters.slice(0, 150)
+    while (pureLetters.length < letterCount) pureLetters = pureLetters.concat(pureLetters)
+    pureLetters = pureLetters.slice(0, letterCount)
 
     pureLetters.forEach((letter) => {
       const wrapper = document.createElement('div')
@@ -209,7 +227,7 @@ function HomePage({ initialModule = null }) {
         innerEl: inner,
         baseX: radius * Math.sin(phi) * Math.cos(theta),
         baseY: radius * Math.sin(phi) * Math.sin(theta),
-        baseZ: -2000 + radius * Math.cos(phi),
+        baseZ: (isLiteScene ? -500 : -2000) + radius * Math.cos(phi),
         driftSpeedX: (Math.random() - 0.5) * 3,
         driftSpeedY: (Math.random() - 0.5) * 3,
         growthRate: 1 + Math.random() * 3,
@@ -239,23 +257,34 @@ function HomePage({ initialModule = null }) {
     })
 
     const loop = () => {
+      if (isLiteScene) {
+        const now = window.performance.now()
+        if (now - lastLiteFrameTimeRef.current < 66) {
+          rafRef.current = window.requestAnimationFrame(loop)
+          return
+        }
+        lastLiteFrameTimeRef.current = now
+      }
+
       if (blobBgRef.current) {
-        blobBgRef.current.style.transform = `translateY(${-scrollYRef.current * 0.05}px)`
+        blobBgRef.current.style.transform = isLiteScene
+          ? 'translateY(0)'
+          : `translateY(${-scrollYRef.current * 0.05}px)`
       }
 
       if (!isWarpedRef.current) {
-        scrollYRef.current += (targetScrollYRef.current - scrollYRef.current) * 0.08
-        galaxyTimeRef.current += 0.005
+        scrollYRef.current += (targetScrollYRef.current - scrollYRef.current) * (isLiteScene ? 0.22 : 0.08)
+        galaxyTimeRef.current += isLiteScene ? 0.002 : 0.005
 
         const maxScroll = Math.max(1, document.documentElement.scrollHeight - window.innerHeight)
-        const scrollPercent = scrollYRef.current / maxScroll
+        const scrollPercent = isLiteScene ? 0.56 : scrollYRef.current / maxScroll
 
         ringDataRef.current.forEach((ring) => {
-          const zMove = scrollPercent * 7000
+          const zMove = scrollPercent * (isLiteScene ? 900 : 7000)
           const z = ring.baseZ + zMove
-          ring.rx += ring.speedX
-          ring.ry += ring.speedY
-          ring.rz += ring.speedZ
+          ring.rx += ring.speedX * (isLiteScene ? 0.2 : 1)
+          ring.ry += ring.speedY * (isLiteScene ? 0.2 : 1)
+          ring.rz += ring.speedZ * (isLiteScene ? 0.2 : 1)
           ring.el.style.transform = `translate3d(-50%, -50%, ${z}px) rotateX(${ring.rx}deg) rotateY(${ring.ry}deg) rotateZ(${ring.rz}deg)`
           ring.el.style.opacity = Math.max(0, 0.7 - scrollPercent * 1.2)
         })
@@ -276,7 +305,7 @@ function HomePage({ initialModule = null }) {
             node.ry += 0.005 * node.speed * 20 * spinSpeed
             node.rz += 0.005 * node.speed * 10 * spinSpeed
 
-            const flightZ = node.baseZ + scrollPercent * 8000
+            const flightZ = node.baseZ + scrollPercent * (isLiteScene ? 0 : 8000)
             const targetX = lerp(0, node.menu.x, easeOut)
             const targetY = lerp(0, node.menu.y, easeOut)
             const targetZ = lerp(flightZ, 150, easeOut)
@@ -289,7 +318,9 @@ function HomePage({ initialModule = null }) {
             const finalRY = lerp(node.ry, dockRY, easeOut)
             const finalRZ = lerp(node.rz, dockRZ, easeOut)
 
-            if (scrollPercent > mStart) {
+            if (isLiteScene) {
+              node.el.classList.add('active')
+            } else if (scrollPercent > mStart) {
               const t = Math.min(1, (scrollPercent - mStart) / (mEnd - mStart))
               if (t > 0.95) node.el.classList.add('active')
               else node.el.classList.remove('active')
@@ -299,33 +330,35 @@ function HomePage({ initialModule = null }) {
 
             node.el.style.transform = `translate3d(${targetX}px, ${targetY}px, ${targetZ}px) rotateX(${finalRX}deg) rotateY(${finalRY}deg) rotateZ(${finalRZ}deg)`
           } else {
-            const spreadMultiplier = 1 + scrollPercent * 30
-            const driftX = Math.sin(galaxyTimeRef.current * node.driftSpeedX + node.offset) * (100 * scrollPercent)
-            const driftY = Math.cos(galaxyTimeRef.current * node.driftSpeedY + node.offset) * (100 * scrollPercent)
+            const spreadMultiplier = 1 + scrollPercent * (isLiteScene ? 4 : 30)
+            const driftX = Math.sin(galaxyTimeRef.current * node.driftSpeedX + node.offset) * ((isLiteScene ? 22 : 100) * scrollPercent)
+            const driftY = Math.cos(galaxyTimeRef.current * node.driftSpeedY + node.offset) * ((isLiteScene ? 22 : 100) * scrollPercent)
 
             const x = node.baseX * spreadMultiplier + driftX
             const y = node.baseY * spreadMultiplier + driftY
-            const z = node.baseZ + scrollPercent * 6000
+            const z = node.baseZ + scrollPercent * (isLiteScene ? 600 : 6000)
 
             node.el.style.transform = `translate3d(${x}px, ${y}px, ${z}px)`
 
             const scaleAmt = 1 + scrollPercent * node.growthRate
-            const blurAmt = Math.max(0, scrollPercent * 15 - 2)
+            const blurAmt = isLiteScene ? 0 : Math.max(0, scrollPercent * 15 - 2)
             const fadeAmt = Math.max(0, 1 - scrollPercent * 1.5)
 
             node.innerEl.style.transform = `translate(-50%, -50%) scale(${scaleAmt})`
-            node.innerEl.style.filter = `blur(${blurAmt}px)`
+            if (!isLiteScene) {
+              node.innerEl.style.filter = `blur(${blurAmt}px)`
+            }
             node.innerEl.style.opacity = fadeAmt
           }
         })
 
         const heroOpacity = Math.max(0, 1 - scrollPercent * 6)
         if (titleRef.current?.parentElement) {
-          titleRef.current.parentElement.style.opacity = heroOpacity
+          titleRef.current.parentElement.style.opacity = isLiteScene ? 1 : heroOpacity
         }
 
         if (dailyCardRef.current) {
-          if (scrollPercent > 0.6) dailyCardRef.current.classList.add('visible')
+          if (isLiteScene || scrollPercent > 0.6) dailyCardRef.current.classList.add('visible')
           else dailyCardRef.current.classList.remove('visible')
         }
       }
@@ -510,7 +543,7 @@ function HomePage({ initialModule = null }) {
           position: fixed;
           inset: 0;
           width: 100vw;
-          height: 100vh;
+          height: 100svh;
           perspective: 2000px;
           z-index: 10;
         }
@@ -971,9 +1004,109 @@ function HomePage({ initialModule = null }) {
           opacity: 0.5;
         }
         @media (max-width: 900px) {
-          #daily-verse-card { top: 8%; padding: 1.5rem; }
-          .verse-text { font-size: 1.45rem; }
-          .glyph-wrapper.is-menu.active .menu-inner { width: 180px; height: 240px; }
+          .uploaded-homepage {
+            cursor: auto;
+            min-height: 100svh;
+            overflow-x: clip;
+          }
+          .noise-overlay {
+            opacity: 0.025;
+          }
+          .blob {
+            filter: blur(64px);
+            opacity: 0.45;
+            animation-duration: 34s;
+          }
+          #scroll-engine {
+            height: 0;
+          }
+          #viewport {
+            position: relative;
+            min-height: 660px;
+            height: 100svh;
+            perspective: 1200px;
+          }
+          #hero {
+            justify-content: flex-start;
+            padding: 4.75rem 1.25rem 0;
+          }
+          #title {
+            font-size: clamp(3rem, 16vw, 4.4rem);
+            letter-spacing: 0;
+          }
+          #tagline {
+            max-width: 20rem;
+            font-size: 9px;
+            line-height: 1.8;
+            letter-spacing: 0.32em;
+          }
+          #hint {
+            margin-top: 1.2rem;
+          }
+          .hint-line {
+            display: none;
+          }
+          .hint-text {
+            max-width: 16rem;
+            letter-spacing: 0.2em;
+          }
+          .hint-text::before {
+            content: 'Tap a section';
+          }
+          .hint-text {
+            font-size: 0;
+          }
+          .hint-text::before {
+            font-size: 10px;
+          }
+          #daily-verse-card {
+            position: relative;
+            top: auto;
+            left: auto;
+            transform: none;
+            width: calc(100% - 2rem);
+            margin: 1rem auto 6rem;
+            padding: 1.25rem;
+            border-radius: 0.75rem;
+          }
+          #daily-verse-card.visible {
+            transform: none;
+          }
+          .verse-text { font-size: 1.18rem; }
+          .verse-insight { font-size: 12px; }
+          .glyph-wrapper.is-menu.active .menu-inner {
+            width: 132px;
+            height: 146px;
+            padding: 1rem 0.75rem;
+            border-radius: 0.75rem;
+            backdrop-filter: blur(10px);
+            animation: none;
+          }
+          .glyph-wrapper.is-menu.active .glyph-icon {
+            font-size: 32px;
+            transform: translateY(0);
+          }
+          .menu-id {
+            font-size: 0.68rem;
+            letter-spacing: 0.18em;
+            margin-top: 0.5rem;
+          }
+          .menu-desc {
+            font-size: 8px;
+            letter-spacing: 0.12em;
+            line-height: 1.5;
+          }
+          .menu-access-wrap {
+            padding-top: 0.8rem;
+          }
+          .menu-access {
+            padding: 0.4rem 0.6rem;
+            font-size: 8px;
+            letter-spacing: 0.14em;
+          }
+          .glyph-inner {
+            will-change: transform, opacity;
+          }
           .read-main { font-size: 1.4rem; padding: 4rem 1.5rem; }
           .read-header { padding: 0 1.5rem; }
           .module-center { padding: 1rem; }
