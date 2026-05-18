@@ -29,7 +29,7 @@ const MENU_CONFIG = [
   { id: 'DATA', glyph: 'Ω', desc: 'User Archives', x: 350, y: 150, mod: 'mod-data' },
 ]
 
-function HomePage() {
+function HomePage({ initialModule = null }) {
   const navigate = useNavigate()
   const { mode, themeName, themes, toggleMode, setThemeName } = useTheme()
   const galaxyRef = useRef(null)
@@ -349,6 +349,11 @@ function HomePage() {
       document.body.style.overflow = ''
     }
   }, [activeModule])
+
+  useEffect(() => {
+    if (!initialModule) return
+    setActiveModule(initialModule)
+  }, [initialModule])
 
   const askScribeHandler = async () => {
     const question = aiInput.trim()

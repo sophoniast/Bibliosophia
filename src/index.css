@@ -299,6 +299,83 @@ button {
   gap: 0.5rem;
 }
 
+.app-menu {
+  position: fixed;
+  right: 1rem;
+  top: 1rem;
+  z-index: 120;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  pointer-events: none;
+}
+
+.app-menu-trigger,
+.app-menu-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border: 1px solid rgba(var(--c-line), 0.16);
+  background: rgba(var(--c-surface), 0.82);
+  color: rgb(var(--c-text));
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(18px);
+}
+
+.app-menu-trigger {
+  min-width: 5.8rem;
+  min-height: 2.75rem;
+  border-radius: 999px;
+  padding: 0.72rem 0.95rem;
+  font-family: var(--f-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  pointer-events: auto;
+}
+
+.app-menu-panel {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  max-width: min(34rem, calc(100vw - 8rem));
+  overflow-x: auto;
+  padding: 0.18rem;
+  border-radius: 999px;
+  opacity: 0;
+  transform: translateX(0.6rem);
+  pointer-events: none;
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease;
+}
+
+.app-menu.open .app-menu-panel,
+.app-menu:focus-within .app-menu-panel {
+  opacity: 1;
+  transform: translateX(0);
+  pointer-events: auto;
+}
+
+.app-menu-link {
+  min-height: 2.5rem;
+  border-radius: 999px;
+  padding: 0.65rem 0.9rem;
+  color: rgb(var(--c-text-muted));
+  font-family: var(--f-sans);
+  font-size: 0.88rem;
+  white-space: nowrap;
+  pointer-events: auto;
+}
+
+.app-menu-link.active,
+.app-menu-link:hover {
+  color: rgb(var(--c-text));
+  border-color: rgba(var(--c-accent), 0.36);
+  background: rgba(var(--c-accent), 0.2);
+}
+
 .auth-dialog-backdrop {
   position: fixed;
   inset: 0;
@@ -1616,6 +1693,54 @@ button {
 }
 
 @media (max-width: 720px) {
+  .app-menu {
+    top: auto;
+    right: 0.85rem;
+    bottom: max(0.85rem, env(safe-area-inset-bottom));
+    left: 0.85rem;
+    align-items: flex-end;
+    justify-content: flex-end;
+  }
+
+  .app-menu-trigger {
+    min-width: 0;
+    min-height: 3rem;
+    padding-inline: 1rem;
+  }
+
+  .app-menu-panel {
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 0.65rem);
+    left: 0;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.55rem;
+    max-width: none;
+    max-height: min(70vh, 25rem);
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 0.7rem;
+    border: 1px solid rgba(var(--c-line), 0.14);
+    border-radius: 1.1rem;
+    background: rgba(var(--c-bg), 0.9);
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+    backdrop-filter: blur(22px);
+    transform: translateY(0.7rem);
+  }
+
+  .app-menu.open .app-menu-panel,
+  .app-menu:focus-within .app-menu-panel {
+    transform: translateY(0);
+  }
+
+  .app-menu-link {
+    justify-content: flex-start;
+    min-height: 3.2rem;
+    border-radius: 0.75rem;
+    padding: 0.85rem 0.9rem;
+  }
+
   .site-header {
     padding: 0.95rem 1rem;
   }
