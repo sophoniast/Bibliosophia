@@ -5,6 +5,9 @@ import { BookOpen, ChevronRight, Crosshair, Minus, Plus, Ruler, Sparkles } from 
 import SiteFrame from '../components/SiteFrame'
 import { getJourneys } from '../lib/api'
 
+const DEFAULT_MAP_CENTER = [31.7683, 35.2137]
+const DEFAULT_ZOOM = 6
+
 function haversineDistance(lat1, lon1, lat2, lon2) {
   const radius = 6371
   const dLat = ((lat2 - lat1) * Math.PI) / 180
@@ -20,6 +23,8 @@ function haversineDistance(lat1, lon1, lat2, lon2) {
 }
 
 function computePathDistances(path) {
+  if (!Array.isArray(path) || path.length < 2) return { distances: [0], total: 0 }
+
   let total = 0
   const distances = [0]
 
@@ -32,6 +37,7 @@ function computePathDistances(path) {
 }
 
 function polygonCenter(points) {
+  if (!Array.isArray(points) || points.length === 0) return DEFAULT_MAP_CENTER
   const [lat, lon] = points.reduce(
     (accumulator, point) => [accumulator[0] + point[0], accumulator[1] + point[1]],
     [0, 0],
@@ -39,10 +45,28 @@ function polygonCenter(points) {
   return [lat / points.length, lon / points.length]
 }
 
+function getPointLatLng(point) {
+  return [Number(point.lat), Number(point.lon)]
+}
+
+function getValidPath(journey) {
+  const path = Array.isArray(journey?.path)
+    ? journey.path
+      .map((coordinate) => [Number(coordinate?.[0]), Number(coordinate?.[1])])
+      .filter(([lat, lon]) => Number.isFinite(lat) && Number.isFinite(lon))
+    : []
+
+  if (path.length >= 2) return path
+
+  return (journey?.points || [])
+    .map(getPointLatLng)
+    .filter(([lat, lon]) => Number.isFinite(lat) && Number.isFinite(lon))
+}
+
 function MapReaderPage() {
   const mapContainerRef = useRef(null)
   const mapRef = useRef(null)
-  const layersRef = useRef({ markers: [], labels: [], polygons: [], route: null })
+  const layersRef = useRef({ markers: [], labels: [], polygons: [], routes: [] })
   const [journeys, setJourneys] = useState([])
   const [isLoaded, setIsLoaded] = useState(false)
   const [activeJourneyId, setActiveJourneyId] = useState(null)
@@ -72,13 +96,22 @@ function MapReaderPage() {
     () => journeys.find((journey) => journey.id === activeJourneyId) || journeys[0],
     [activeJourneyId, journeys],
   )
+  const activePath = useMemo(() => getValidPath(activeJourney), [activeJourney])
 
   const { distances, total } = useMemo(
-    () => (activeJourney ? computePathDistances(activeJourney.path) : { distances: [0], total: 0 }),
-    [activeJourney],
+    () => (activeJourney ? computePathDistances(activePath) : { distances: [0], total: 0 }),
+    [activeJourney, activePath],
   )
 
-  const currentPoint = activeJourney?.points[selectedWaypoint] || activeJourney?.points[0]
+  const currentPoint = activeJourney?.points?.[selectedWaypoint] || activeJourney?.points?.[0]
+  const currentDistance = distances[selectedWaypoint] || 0
+
+  useEffect(() => {
+    if (!activeJourney?.points?.length) return
+    if (selectedWaypoint > activeJourney.points.length - 1) {
+      setSelectedWaypoint(0)
+    }
+  }, [activeJourney, selectedWaypoint])
 
   useEffect(() => {
     if (mapRef.current || !mapContainerRef.current || !activeJourney) return undefined
@@ -87,7 +120,7 @@ function MapReaderPage() {
       zoomControl: false,
       attributionControl: false,
       scrollWheelZoom: true,
-    }).setView([31.7683, 35.2137], 6)
+    }).setView(DEFAULT_MAP_CENTER, DEFAULT_ZOOM)
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 18,
@@ -110,8 +143,8 @@ function MapReaderPage() {
       layersRef.current.markers.forEach((layer) => map.removeLayer(layer))
       layersRef.current.labels.forEach((layer) => map.removeLayer(layer))
       layersRef.current.polygons.forEach((layer) => map.removeLayer(layer))
-      if (layersRef.current.route) map.removeLayer(layersRef.current.route)
-      layersRef.current = { markers: [], labels: [], polygons: [], route: null }
+      layersRef.current.routes.forEach((layer) => map.removeLayer(layer))
+      layersRef.current = { markers: [], labels: [], polygons: [], routes: [] }
     }
 
     clearLayers()
@@ -137,12 +170,22 @@ function MapReaderPage() {
       layersRef.current.labels.push(label)
     })
 
-    layersRef.current.route = L.polyline(activeJourney.path, {
-      color: '#f8fafc',
-      weight: 4,
-      opacity: 0.95,
-      dashArray: '14 10',
-    }).addTo(map)
+    if (activePath.length >= 2) {
+      const haloRoute = L.polyline(activePath, {
+        color: '#f8fafc',
+        weight: 7,
+        opacity: 0.9,
+      }).addTo(map)
+
+      const route = L.polyline(activePath, {
+        color: '#d97706',
+        weight: 4,
+        opacity: 0.92,
+        dashArray: '12 10',
+      }).addTo(map)
+
+      layersRef.current.routes.push(haloRoute, route)
+    }
 
     activeJourney.points.forEach((point, index) => {
       if (!Number.isFinite(point.lat) || !Number.isFinite(point.lon)) return
@@ -162,7 +205,7 @@ function MapReaderPage() {
       layersRef.current.markers.push(marker)
     })
 
-    const pathPoints = activeJourney.path.filter(([lat, lon]) => Number.isFinite(lat) && Number.isFinite(lon))
+    const pathPoints = activePath
     if (pathPoints.length) {
       const bounds = L.latLngBounds(pathPoints.map(([lat, lon]) => [lat, lon]))
       window.requestAnimationFrame(() => {
@@ -170,13 +213,15 @@ function MapReaderPage() {
         map.fitBounds(bounds.pad(0.32))
       })
     }
-  }, [activeJourney, selectedWaypoint])
+  }, [activeJourney, activePath, selectedWaypoint])
 
   const handleZoomIn = () => mapRef.current?.zoomIn()
   const handleZoomOut = () => mapRef.current?.zoomOut()
   const handleRecenter = () => {
     if (!mapRef.current || !activeJourney) return
-    const bounds = L.latLngBounds(activeJourney.path.map(([lat, lon]) => [lat, lon]))
+    const path = getValidPath(activeJourney)
+    if (!path.length) return
+    const bounds = L.latLngBounds(path.map(([lat, lon]) => [lat, lon]))
     mapRef.current.fitBounds(bounds.pad(0.32))
   }
 
@@ -231,8 +276,8 @@ function MapReaderPage() {
                     Biblical Map Reader
                   </h1>
                   <p style={{ margin: '0.45rem 0 0', color: 'rgb(var(--c-text-muted))', lineHeight: 1.7 }}>
-                    A tilted, immersive journey surface modeled after the uploaded map brief and wired as a
-                    real route inside the app.
+                    A canonical biblical atlas with local fallback data for the major routes of Scripture, built
+                    for stable study on mobile and desktop.
                   </p>
                 </div>
                 <div className="journey-switcher">
@@ -291,10 +336,10 @@ function MapReaderPage() {
                       Checkpoint Distance
                     </div>
                     <div style={{ marginTop: '0.35rem', fontWeight: 700, fontSize: '1.1rem', color: '#111827' }}>
-                      {(distances[selectedWaypoint] * 0.621371).toFixed(0)} mi
+                      {(currentDistance * 0.621371).toFixed(0)} mi
                     </div>
                     <div style={{ color: '#6b7280', fontSize: '0.92rem' }}>
-                      {distances[selectedWaypoint].toFixed(0)} km
+                      {currentDistance.toFixed(0)} km
                     </div>
                   </div>
                 </div>

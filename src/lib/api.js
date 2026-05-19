@@ -46,6 +46,66 @@ async function searchWikimediaFallback(query) {
   return { results }
 }
 
+function isFiniteCoordinate(value) {
+  return Number.isFinite(Number(value))
+}
+
+function normalizeJourney(journey) {
+  if (!journey || !journey.id || !journey.title) return null
+
+  const points = Array.isArray(journey.points)
+    ? journey.points
+      .map((point) => ({
+        ...point,
+        lat: Number(point.lat),
+        lon: Number(point.lon),
+        lore: {
+          political: point.lore?.political || 'Regional powers, trade routes, and local rulers shaped this location.',
+          religion: point.lore?.religion || 'The place intersects biblical worship, covenant memory, or rival religious claims.',
+          spiritual: point.lore?.spiritual || 'This stop highlights how geography carries theological meaning in the biblical story.',
+          funFact: point.lore?.funFact || 'Use this waypoint as a visual anchor for reading the surrounding passage.',
+        },
+      }))
+      .filter((point) => isFiniteCoordinate(point.lat) && isFiniteCoordinate(point.lon) && point.name)
+    : []
+
+  const path = Array.isArray(journey.path)
+    ? journey.path
+      .map((coordinate) => [Number(coordinate?.[0]), Number(coordinate?.[1])])
+      .filter(([lat, lon]) => isFiniteCoordinate(lat) && isFiniteCoordinate(lon))
+    : []
+
+  const normalizedPath = path.length >= 2 ? path : points.map((point) => [point.lat, point.lon])
+
+  if (!points.length || normalizedPath.length < 2) return null
+
+  return {
+    ...journey,
+    books: journey.books || 'Canonical Scripture',
+    civilizations: Array.isArray(journey.civilizations) ? journey.civilizations : [],
+    description: journey.description || 'A canonical biblical geography route.',
+    path: normalizedPath,
+    points,
+  }
+}
+
+function mergeCanonicalJourneys(remoteJourneys = []) {
+  const canonical = JOURNEYS.map(normalizeJourney).filter(Boolean)
+  const merged = new Map(canonical.map((journey) => [journey.id, journey]))
+
+  remoteJourneys
+    .map(normalizeJourney)
+    .filter(Boolean)
+    .forEach((journey) => {
+      merged.set(journey.id, {
+        ...merged.get(journey.id),
+        ...journey,
+      })
+    })
+
+  return Array.from(merged.values())
+}
+
 export async function getHomeData() {
   if (!hasSupabaseEnv) {
     return {
@@ -75,30 +135,7 @@ export async function getHomeData() {
 }
 
 export async function getJourneys() {
-  if (!hasSupabaseEnv) return JOURNEYS
-
-  try {
-    const { data, error } = await supabase
-      .from('app_journeys')
-      .select('payload')
-      .order('sort_order', { ascending: true })
-
-    if (error) throw error
-
-    const journeys = data
-      .map((row) => row.payload)
-      .filter((journey) => (
-        journey &&
-        Array.isArray(journey.path) &&
-        Array.isArray(journey.points) &&
-        journey.path.length > 0 &&
-        journey.points.length > 0
-      ))
-
-    return journeys.length ? journeys : JOURNEYS
-  } catch {
-    return JOURNEYS
-  }
+  return mergeCanonicalJourneys()
 }
 
 export async function getPreferences() {

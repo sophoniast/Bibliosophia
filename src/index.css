@@ -1277,28 +1277,25 @@ button {
 .map-stage {
   position: relative;
   min-height: calc(100vh - 2.4rem);
-  border-radius: 2rem;
+  border-radius: 1.25rem;
   overflow: hidden;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(21rem, 28rem);
+  background: rgba(var(--c-bg), 0.82);
 }
 
 .map-tilt-wrapper {
-  position: absolute;
-  inset: 0;
-  perspective: 1300px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  position: relative;
+  min-height: calc(100vh - 2.4rem);
   background: rgb(var(--c-surface));
 }
 
 .map-tilt-plane {
-  width: 180vw;
-  height: 180vh;
-  transform: rotateX(65deg) rotateZ(-4deg) scale(1.26) translateY(-10%);
-  transform-style: preserve-3d;
+  width: 100%;
+  height: 100%;
   overflow: hidden;
-  border-radius: 2.8rem;
-  box-shadow: 0 90px 180px rgba(0, 0, 0, 0.72);
+  border-radius: 0;
+  box-shadow: inset -1px 0 0 rgba(var(--c-line), 0.14);
 }
 
 .map-canvas {
@@ -1308,14 +1305,14 @@ button {
 }
 
 .map-overlay {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
+  position: relative;
+  display: grid;
+  align-content: start;
   gap: 1rem;
   padding: 1.2rem;
-  pointer-events: none;
+  pointer-events: auto;
+  overflow-y: auto;
+  max-height: calc(100vh - 2.4rem);
 }
 
 .map-overlay > * {
@@ -1327,6 +1324,9 @@ button {
   gap: 0.6rem;
   flex-wrap: wrap;
   margin-top: 0.8rem;
+  max-height: 18rem;
+  overflow-y: auto;
+  padding-right: 0.25rem;
 }
 
 .journey-button {
@@ -1348,9 +1348,9 @@ button {
 
 .map-bottom-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.3fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   gap: 1rem;
-  align-items: end;
+  align-items: start;
 }
 
 .map-context-card {
@@ -1395,7 +1395,8 @@ button {
 
 .map-controls {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  flex-wrap: wrap;
   gap: 0.8rem;
 }
 
@@ -1857,6 +1858,7 @@ button {
     min-height: 0;
     overflow: visible;
     border-radius: 1.2rem;
+    display: block;
   }
 
   .map-tilt-wrapper {
@@ -1883,11 +1885,19 @@ button {
     padding: 0.85rem 0 0;
     display: grid;
     gap: 0.85rem;
+    max-height: none;
+    overflow: visible;
   }
 
   .map-controls {
     flex-direction: row;
     justify-content: flex-end;
+  }
+
+  .journey-switcher {
+    max-height: 13rem;
+    display: grid;
+    grid-template-columns: 1fr;
   }
 
   .map-context-card {
