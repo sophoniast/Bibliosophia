@@ -238,54 +238,67 @@ export async function saveReaderState(readingKey, payload) {
 }
 
 export async function askReader(payload) {
-  if (!hasSupabaseEnv) {
-    return {
-      answer: fallbackAnswer(payload.question, payload.readingTitle, payload.selectedEntry),
-    }
-  }
-
-  await ensureSupabaseSession()
-  const { data, error } = await supabase.functions.invoke('reader-ai', {
-    body: payload,
+  const fallback = () => ({
+    answer: fallbackAnswer(payload.question, payload.readingTitle, payload.selectedEntry),
   })
 
-  if (error) {
-    return {
-      answer: fallbackAnswer(payload.question, payload.readingTitle, payload.selectedEntry),
-    }
+  if (!hasSupabaseEnv) {
+    return fallback()
   }
 
-  return data
+  try {
+    await ensureSupabaseSession()
+    const { data, error } = await supabase.functions.invoke('reader-ai', {
+      body: payload,
+    })
+
+    if (error || !data?.answer) {
+      return fallback()
+    }
+
+    return data
+  } catch {
+    return fallback()
+  }
 }
 
 export async function searchVerseImageLibrary(payload) {
+  if (payload?.source === 'commons') {
+    return searchWikimediaFallback(payload.query || '')
+  }
+
   if (!hasSupabaseEnv) {
-    if (payload?.source === 'commons') {
-      return searchWikimediaFallback(payload.query || '')
+    return {
+      results: [],
     }
-
-    throw new Error('Secure image providers require Supabase configuration.')
   }
 
-  await ensureSupabaseSession()
-  const { data, error } = await supabase.functions.invoke('image-search', {
-    body: payload,
-  })
+  try {
+    await ensureSupabaseSession()
+    const { data, error } = await supabase.functions.invoke('image-search', {
+      body: payload,
+    })
 
-  if (error) {
-    const response = error.context
-    if (response instanceof Response) {
-      try {
-        const payload = await response.json()
-        throw new Error(payload.error || `Image search failed (${response.status}).`)
-      } catch {
-        throw new Error(`Image search failed (${response.status}).`)
+    if (error) {
+      const response = error.context
+      if (response instanceof Response) {
+        try {
+          const errorPayload = await response.json()
+          throw new Error(errorPayload.error || `Image search failed (${response.status}).`)
+        } catch {
+          throw new Error(`Image search failed (${response.status}).`)
+        }
       }
+
+      throw error
     }
 
-    throw error
+    return data
+  } catch {
+    return {
+      results: [],
+    }
   }
-  return data
 }
 
 export async function getVerseImageSources() {

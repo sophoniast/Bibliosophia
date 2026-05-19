@@ -1396,7 +1396,7 @@ function BibleReaderPage() {
       setBackgroundSearchResults(results)
       setBackgroundSearchStatus('ready')
       if (results.length === 0) {
-        setBackgroundSearchError('No images found for that search yet. Try a broader biblical phrase.')
+        setBackgroundSearchError('No external results are available right now. The built-in Studio backgrounds still work without backend setup.')
       }
     } catch (error) {
       setBackgroundSearchResults([])
@@ -1668,6 +1668,7 @@ function BibleReaderPage() {
     if (!question || !reading) return
 
     setChatHistory((current) => [...current, { role: 'user', text: question }])
+    setChatHistory((current) => [...current, { role: 'assistant', text: 'Reading the passage and preparing an exegetical response...' }])
     setAiQuestion('')
 
     askReader({
@@ -1676,11 +1677,14 @@ function BibleReaderPage() {
       selectedEntry,
     })
       .then((payload) => {
-        setChatHistory((current) => [...current, { role: 'assistant', text: payload.answer }])
+        setChatHistory((current) => [
+          ...current.slice(0, -1),
+          { role: 'assistant', text: payload.answer || 'I could not produce a response for that prompt yet.' },
+        ])
       })
       .catch(() => {
         setChatHistory((current) => [
-          ...current,
+          ...current.slice(0, -1),
           { role: 'assistant', text: 'Error: Connection lost. The study assistant is currently unreachable.' },
         ])
       })
@@ -2461,7 +2465,7 @@ function BibleReaderPage() {
         .verse-image-modal {
           position: fixed;
           inset: 0;
-          z-index: 120;
+          z-index: 220;
           display:grid;
           place-items:center;
           padding: 1.5rem;
@@ -2615,10 +2619,25 @@ function BibleReaderPage() {
           }
           .verse-image-panel {
             width: min(96vw, 42rem);
-            max-height: min(94vh, 62rem);
+            max-height: min(90vh, 62rem);
             overflow-y:auto;
           }
           .verse-image-layout { grid-template-columns: minmax(0, 1fr); }
+          .verse-image-preview {
+            min-height: 20rem;
+            padding: 1.25rem;
+          }
+          .verse-image-preview .copy {
+            font-size: clamp(1.45rem, 8vw, 2.25rem);
+          }
+          .resource-search-form {
+            align-items: stretch;
+            flex-direction: column;
+          }
+          .asset-grid {
+            grid-template-columns: minmax(0, 1fr);
+            max-height: 22rem;
+          }
         }
       `}</style>
 

@@ -1,4 +1,4 @@
-import { Suspense, lazy, useState } from 'react'
+import { Component, Suspense, lazy, useState } from 'react'
 import { BookOpenText, Compass, Home, Menu, PenLine, X } from 'lucide-react'
 import { BrowserRouter, NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { ThemeProvider } from './context/ThemeContext'
@@ -69,6 +69,40 @@ function AmbientBackdrop() {
   )
 }
 
+class AppErrorBoundary extends Component {
+  constructor(props) {
+    super(props)
+    this.state = { hasError: false }
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true }
+  }
+
+  componentDidCatch(error) {
+    console.error('Bibliosophia route error', error)
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <main className="route-error">
+          <div className="glass-panel route-error-panel">
+            <p className="section-kicker">Recovery Mode</p>
+            <h1>Bibliosophia caught a page error.</h1>
+            <p>Use the menu to reopen a section, or refresh the page to restore the current view.</p>
+            <button type="button" onClick={() => this.setState({ hasError: false })}>
+              Try Again
+            </button>
+          </div>
+        </main>
+      )
+    }
+
+    return this.props.children
+  }
+}
+
 function App() {
   return (
     <AuthProvider>
@@ -77,15 +111,17 @@ function App() {
           <AmbientBackdrop />
           <AppMenu />
           <ThemeDock />
-          <Suspense fallback={<div className="route-loading">Loading Bibliosophia...</div>}>
-            <Routes>
-              <Route path="/" element={<HomePage />} />
-              <Route path="/scribe" element={<HomePage initialModule="mod-scribe" />} />
-              <Route path="/map" element={<MapReaderPage />} />
-              <Route path="/reader" element={<BibleReaderPage />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-          </Suspense>
+          <AppErrorBoundary>
+            <Suspense fallback={<div className="route-loading">Loading Bibliosophia...</div>}>
+              <Routes>
+                <Route path="/" element={<HomePage />} />
+                <Route path="/scribe" element={<HomePage initialModule="mod-scribe" />} />
+                <Route path="/map" element={<MapReaderPage />} />
+                <Route path="/reader" element={<BibleReaderPage />} />
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
+            </Suspense>
+          </AppErrorBoundary>
         </BrowserRouter>
       </ThemeProvider>
     </AuthProvider>

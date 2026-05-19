@@ -31,7 +31,9 @@ function ThemeDock() {
                 }}
                 title={`${theme.name} — ${theme.description}`}
                 type="button"
-              />
+              >
+                <span className="theme-swatch-label">{theme.name.replace(/^The\s+/i, '')}</span>
+              </button>
             )
           })}
         </div>
