@@ -1,6 +1,7 @@
 import { Component, Suspense, lazy, useState } from 'react'
 import { BookOpenText, Compass, Home, Menu, PenLine, X } from 'lucide-react'
 import { BrowserRouter, NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { Analytics } from '@vercel/analytics/react'
 import { ThemeProvider } from './context/ThemeContext'
 import { AuthProvider } from './context/AuthContext'
 import ThemeDock from './components/ThemeDock'
@@ -122,6 +123,7 @@ function App() {
               </Routes>
             </Suspense>
           </AppErrorBoundary>
+          <Analytics />
         </BrowserRouter>
       </ThemeProvider>
     </AuthProvider>
