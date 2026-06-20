@@ -49,6 +49,7 @@
     "@fontsource/teko": "^5.2.7",
     "@fontsource/yeseva-one": "^5.2.7",
     "@supabase/supabase-js": "^2.104.0",
+    "@vercel/analytics": "^2.0.1",
     "animejs": "^4.3.6",
     "dotenv": "^17.4.2",
     "leaflet": "^1.9.4",
