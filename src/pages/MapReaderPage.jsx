@@ -99,14 +99,10 @@ function MapReaderPage() {
   const followRef = useRef(false)
   const progressRef = useRef(0)
   const paletteRef = useRef(palette)
-  const reduceMotionRef = useRef(false)
-  paletteRef.current = palette
-  reduceMotionRef.current = prefersReducedMotion()
 
   const [journeys, setJourneys] = useState([])
   const [isLoaded, setIsLoaded] = useState(false)
   const [activeJourneyId, setActiveJourneyId] = useState(null)
-  const [selectedWaypoint, setSelectedWaypoint] = useState(0)
   const [hoveredWaypoint, setHoveredWaypoint] = useState(null)
   const [progress, setProgress] = useState(0)
   const [isPlaying, setIsPlaying] = useState(false)
@@ -148,20 +144,17 @@ function MapReaderPage() {
     [activeJourney, activePath, distances],
   )
 
+  const selectedWaypoint = getWaypointIndexForDistance(waypointDistances, total * progress)
   const currentPoint = activeJourney?.points?.[selectedWaypoint] || activeJourney?.points?.[0]
   const currentDistance = total * progress
-  const reduceMotion = reduceMotionRef.current
 
   useEffect(() => {
     progressRef.current = progress
   }, [progress])
 
   useEffect(() => {
-    if (!activeJourney?.points?.length) return
-    if (selectedWaypoint > activeJourney.points.length - 1) {
-      setSelectedWaypoint(0)
-    }
-  }, [activeJourney, selectedWaypoint])
+    paletteRef.current = palette
+  }, [palette])
 
   useEffect(() => {
     if (mapRef.current || !mapContainerRef.current) return undefined
@@ -262,7 +255,7 @@ function MapReaderPage() {
         polygon.on('click', () => {
           setSelectedCivilization(civilization)
           map.flyTo(polygonCenter(civilization.bounds), Math.max(map.getZoom(), 6), {
-            duration: reduceMotionRef.current ? 0 : 0.85,
+            duration: prefersReducedMotion() ? 0 : 0.85,
           })
         })
 
@@ -313,13 +306,12 @@ function MapReaderPage() {
       }).addTo(map)
 
       marker.on('click', () => {
-        setSelectedWaypoint(index)
         setIsLoreExpanded(true)
         setIsPlaying(false)
         const nextProgress = total > 0 ? (waypointDistances[index] || 0) / total : 0
         setProgress(nextProgress)
         map.flyTo([point.lat, point.lon], Math.max(map.getZoom(), 7), {
-          duration: reduceMotionRef.current ? 0 : 1.05,
+          duration: prefersReducedMotion() ? 0 : 1.05,
         })
       })
       marker.on('mouseover', () => setHoveredWaypoint(index))
@@ -357,13 +349,13 @@ function MapReaderPage() {
     const frameId = window.requestAnimationFrame(() => {
       map.invalidateSize()
       map.fitBounds(L.latLngBounds(activePath).pad(0.28), {
-        animate: !reduceMotion,
+        animate: !prefersReducedMotion(),
         duration: 0.9,
       })
     })
 
     return () => window.cancelAnimationFrame(frameId)
-  }, [activeJourney?.id, activePath, reduceMotion])
+  }, [activeJourney?.id, activePath])
 
   useEffect(() => {
     const targetDistance = total * progress
@@ -373,15 +365,10 @@ function MapReaderPage() {
     traveledRef.current?.setLatLngs(traveledPoints.length ? traveledPoints : [position])
     travelerRef.current?.setLatLng(position)
 
-    if (followRef.current && mapRef.current && !reduceMotion) {
+    if (followRef.current && mapRef.current && !prefersReducedMotion()) {
       mapRef.current.setView(position, mapRef.current.getZoom(), { animate: false })
     }
-
-    const nextWaypoint = getWaypointIndexForDistance(waypointDistances, targetDistance)
-    if (nextWaypoint !== selectedWaypoint) {
-      setSelectedWaypoint(nextWaypoint)
-    }
-  }, [activePath, distances, progress, reduceMotion, selectedWaypoint, total, waypointDistances])
+  }, [activePath, distances, progress, total])
 
   useEffect(() => {
     layersRef.current.markers.forEach((marker, index) => {
@@ -434,16 +421,15 @@ function MapReaderPage() {
   const selectWaypoint = useCallback((index, { expandLore = true, fly = true } = {}) => {
     if (!activeJourney?.points?.[index]) return
     const point = activeJourney.points[index]
-    setSelectedWaypoint(index)
     setIsPlaying(false)
     setProgress(total > 0 ? (waypointDistances[index] || 0) / total : 0)
     if (expandLore) setIsLoreExpanded(true)
     if (fly && mapRef.current) {
       mapRef.current.flyTo([point.lat, point.lon], Math.max(mapRef.current.getZoom(), 7), {
-        duration: reduceMotion ? 0 : 1.05,
+        duration: prefersReducedMotion() ? 0 : 1.05,
       })
     }
-  }, [activeJourney, reduceMotion, total, waypointDistances])
+  }, [activeJourney, total, waypointDistances])
 
   useEffect(() => {
     const handleKeyDown = (event) => {
@@ -482,14 +468,13 @@ function MapReaderPage() {
     setIsPlaying(false)
     followRef.current = false
     mapRef.current.fitBounds(L.latLngBounds(activePath).pad(0.28), {
-      animate: !reduceMotion,
+      animate: !prefersReducedMotion(),
       duration: 0.9,
     })
   }
   const handleReset = () => {
     setIsPlaying(false)
     setProgress(0)
-    setSelectedWaypoint(0)
     setSelectedCivilization(null)
     handleRecenter()
   }
@@ -498,7 +483,7 @@ function MapReaderPage() {
     setIsPlaying(false)
     setProgress(next)
     const position = getPointAlongPath(activePath, distances, total * next)
-    mapRef.current?.panTo(position, { animate: !reduceMotion })
+    mapRef.current?.panTo(position, { animate: !prefersReducedMotion() })
   }
 
   if (!activeJourney && !isLoaded) {
@@ -562,7 +547,6 @@ function MapReaderPage() {
                       className={`journey-button${journey.id === activeJourneyId ? ' active' : ''}`}
                       onClick={() => {
                         setActiveJourneyId(journey.id)
-                        setSelectedWaypoint(0)
                         setProgress(0)
                         setIsPlaying(false)
                         setIsLoreExpanded(false)
@@ -631,8 +615,8 @@ function MapReaderPage() {
                     <div className="map-checkpoint-kicker">
                       Checkpoint {selectedWaypoint + 1} / {activeJourney.points.length}
                     </div>
-                    <h2>{currentPoint.name}</h2>
-                    <p>{currentPoint.history}</p>
+                    <h2>{currentPoint?.name}</h2>
+                    <p>{currentPoint?.history}</p>
                   </div>
                   <div className="map-distance">
                     <div className="map-checkpoint-kicker">Along the route</div>
@@ -712,7 +696,7 @@ function MapReaderPage() {
                   </button>
                 </div>
 
-                {isLoreExpanded ? (
+                {isLoreExpanded && currentPoint?.lore ? (
                   <div className="lore-grid">
                     <div className="lore-item">
                       <div className="section-kicker lore-political">Political Climate</div>
