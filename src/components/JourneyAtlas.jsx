@@ -80,6 +80,21 @@ const SEA_LABELS = [
   { name: 'Euphrates', lat: 34.4, lon: 42.8 },
 ]
 
+// Stylized landform relief marks (approximate ranges), sized in SVG user units.
+const MOUNTAINS = [
+  { lat: 39.7, lon: 44.3, size: 21 }, // Ararat
+  { lat: 38.6, lon: 42.2, size: 15 }, // Armenian highlands
+  { lat: 37.4, lon: 35.0, size: 17 }, // Taurus
+  { lat: 33.9, lon: 35.9, size: 13 }, // Lebanon
+  { lat: 33.4, lon: 46.8, size: 18 }, // Zagros
+  { lat: 31.6, lon: 47.9, size: 14 }, // Zagros south
+  { lat: 30.3, lon: 35.4, size: 12 }, // Seir / Edom
+  { lat: 28.6, lon: 33.9, size: 12 }, // Sinai
+]
+
+// Faux elevation-band scales used to inset the coastline into highland contours.
+const CONTOUR_SCALES = [0.86, 0.72, 0.58, 0.44]
+
 function pathD(points, close = false) {
   return pointsToPath(points, W, H, ATLAS_BOUNDS, close)
 }
@@ -163,6 +178,21 @@ export default function JourneyAtlas({
   const waterFill = night ? 'rgba(42, 78, 92, 0.48)' : 'rgba(122, 168, 176, 0.42)'
   const ink = night ? 'rgba(236, 228, 208, 0.88)' : 'rgba(48, 40, 28, 0.82)'
   const muted = night ? 'rgba(214, 201, 168, 0.5)' : 'rgba(92, 78, 52, 0.48)'
+  // Shaded-relief palette: a light source from the upper-left sculpts the land.
+  const reliefLight = night ? 'rgba(120, 102, 62, 0.62)' : 'rgba(226, 202, 148, 0.85)'
+  const reliefDark = night ? 'rgba(44, 37, 22, 0.68)' : 'rgba(170, 141, 84, 0.62)'
+  const coastLine = night ? 'rgba(228, 214, 178, 0.4)' : 'rgba(74, 60, 38, 0.52)'
+  const highland = night ? 'rgba(214, 190, 138, 0.3)' : 'rgba(150, 120, 68, 0.34)'
+  const coastHalo = night ? 'rgba(60, 104, 118, 0.55)' : 'rgba(120, 166, 176, 0.55)'
+  const reliefShadow = night ? '#000000' : '#3a2f1c'
+  const mountainLight = night ? 'rgba(216, 198, 150, 0.9)' : 'rgba(238, 222, 176, 0.95)'
+  const mountainDark = night ? 'rgba(58, 48, 28, 0.92)' : 'rgba(120, 96, 54, 0.88)'
+  const snowCap = night ? 'rgba(226, 232, 238, 0.72)' : 'rgba(255, 255, 255, 0.9)'
+  const landCenter = useMemo(() => {
+    const pts = LAND_TINT.map(([lat, lon]) => projectPoint(lat, lon, W, H, ATLAS_BOUNDS))
+    const [sx, sy] = pts.reduce((acc, [x, y]) => [acc[0] + x, acc[1] + y], [0, 0])
+    return [sx / pts.length, sy / pts.length]
+  }, [])
   const selectedCivId = selectedCivilization ? civKey(selectedCivilization) : null
   const morphActive = Boolean(hoveredCivilization || selectedCivId)
 
@@ -337,11 +367,57 @@ export default function JourneyAtlas({
                 <filter id={`${uid}-soft`} x="-20%" y="-20%" width="140%" height="140%">
                   <feGaussianBlur stdDeviation="1.1" />
                 </filter>
+                <linearGradient id={`${uid}-relief`} x1="0.12" y1="0.05" x2="0.82" y2="1">
+                  <stop offset="0%" stopColor={reliefLight} />
+                  <stop offset="55%" stopColor={landFill} />
+                  <stop offset="100%" stopColor={reliefDark} />
+                </linearGradient>
+                <filter id={`${uid}-emboss`} x="-25%" y="-25%" width="150%" height="150%">
+                  <feDropShadow dx="0" dy="9" stdDeviation="10" floodColor={reliefShadow} floodOpacity={night ? 0.6 : 0.32} />
+                </filter>
+                <filter id={`${uid}-halo`} x="-45%" y="-45%" width="190%" height="190%">
+                  <feGaussianBlur stdDeviation="9" />
+                </filter>
               </defs>
 
               <rect width={W} height={H} fill={`url(#${uid}-parchment)`} />
               <rect width={W} height={H} fill={parchment} />
-              <path d={landD} fill={landFill} stroke={accent} strokeOpacity="0.14" strokeWidth="1.2" />
+
+              <path
+                d={landD}
+                fill="none"
+                stroke={coastHalo}
+                strokeOpacity="0.55"
+                strokeWidth="22"
+                strokeLinejoin="round"
+                filter={`url(#${uid}-halo)`}
+                pointerEvents="none"
+              />
+              <g filter={`url(#${uid}-emboss)`} pointerEvents="none">
+                <path
+                  d={landD}
+                  fill={`url(#${uid}-relief)`}
+                  stroke={coastLine}
+                  strokeOpacity="0.65"
+                  strokeWidth="1.6"
+                  strokeLinejoin="round"
+                />
+              </g>
+              <g pointerEvents="none">
+                {CONTOUR_SCALES.map((scale, index) => (
+                  <path
+                    key={scale}
+                    d={landD}
+                    transform={`translate(${landCenter[0]} ${landCenter[1]}) scale(${scale}) translate(${-landCenter[0]} ${-landCenter[1]})`}
+                    fill="none"
+                    stroke={highland}
+                    strokeOpacity={Math.max(0.12, 0.5 - index * 0.1)}
+                    strokeWidth="1.1"
+                    strokeLinejoin="round"
+                  />
+                ))}
+              </g>
+
               <rect width={W} height={H} fill={`url(#${uid}-grid)`} />
 
               {waterPaths.map((water) => (
@@ -371,6 +447,24 @@ export default function JourneyAtlas({
                   <title>{river.label}</title>
                 </path>
               ))}
+
+              <g className="journey-atlas-relief" pointerEvents="none">
+                {MOUNTAINS.map((mountain, index) => {
+                  const [mx, my] = projectPoint(mountain.lat, mountain.lon, W, H, ATLAS_BOUNDS)
+                  const s = mountain.size
+                  return (
+                    <g key={`mountain-${index}`} transform={`translate(${mx} ${my})`}>
+                      <ellipse cx="0" cy={s * 0.12} rx={s * 0.82} ry={s * 0.24} fill={reliefShadow} opacity={night ? 0.34 : 0.22} />
+                      <polygon points={`0,${-s} ${-s * 0.72},0 0,0`} fill={mountainLight} />
+                      <polygon points={`0,${-s} 0,0 ${s * 0.72},0`} fill={mountainDark} />
+                      <polygon
+                        points={`0,${-s} ${-s * 0.24},${-s * 0.66} 0,${-s * 0.56} ${s * 0.24},${-s * 0.66}`}
+                        fill={snowCap}
+                      />
+                    </g>
+                  )
+                })}
+              </g>
 
               {showRegions
                 ? civPaths.map((civ) => {
