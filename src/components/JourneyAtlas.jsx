@@ -363,8 +363,8 @@ export default function JourneyAtlas({
                   data-river={river.id}
                   d={river.d}
                   fill="none"
-                  stroke={accent}
-                  strokeOpacity="0.42"
+                  stroke={night ? '#7aa8b0' : '#4f7f88'}
+                  strokeOpacity="0.7"
                   strokeWidth="1.7"
                   strokeLinecap="round"
                 >
