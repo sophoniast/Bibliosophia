@@ -1293,7 +1293,9 @@ button {
 .map-tilt-wrapper {
   position: absolute;
   inset: 0;
-  background: rgb(var(--c-surface));
+  background:
+    radial-gradient(circle at 18% 20%, rgba(var(--c-accent), 0.12), transparent 32%),
+    linear-gradient(160deg, rgb(var(--c-surface)), rgb(var(--c-bg)));
 }
 
 .map-tilt-plane {
@@ -1302,26 +1304,87 @@ button {
   overflow: hidden;
 }
 
-.map-canvas,
-.leaflet-container {
+.journey-atlas,
+.journey-atlas-placeholder {
   width: 100%;
   height: 100%;
-  background: rgb(var(--c-bg));
-  font-family: var(--f-sans);
+  min-height: 22rem;
 }
 
-.map-canvas {
-  filter: contrast(1.08) saturate(1.04) brightness(1.02);
+.journey-atlas-placeholder {
+  background:
+    linear-gradient(160deg, #1a1710, #0e0c09);
 }
 
-.leaflet-control-attribution {
-  background: rgba(var(--c-surface), 0.72) !important;
-  color: rgb(var(--c-text-muted)) !important;
-  backdrop-filter: blur(12px);
+.journey-atlas-stage {
+  width: 100%;
+  height: 100%;
+  perspective: 1600px;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
 }
 
-.leaflet-control-attribution a {
-  color: rgb(var(--c-accent)) !important;
+.journey-atlas-stage:active {
+  cursor: grabbing;
+}
+
+.journey-atlas-zoom {
+  width: 100%;
+  height: 100%;
+  transform: translate(var(--atlas-x, 0px), var(--atlas-y, 0px)) scale(var(--atlas-zoom, 1));
+  transform-origin: center center;
+}
+
+.journey-atlas-tilt {
+  width: 122%;
+  height: 122%;
+  margin: -8% 0 0 -11%;
+  transform: rotateX(48deg) rotateZ(-8deg);
+  transform-origin: 50% 58%;
+  transform-style: preserve-3d;
+  transition: transform 420ms ease;
+}
+
+.journey-atlas[data-tilt='off'] .journey-atlas-tilt {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  transform: none;
+}
+
+.journey-atlas-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  filter: drop-shadow(0 28px 48px rgba(0, 0, 0, 0.28));
+}
+
+.journey-atlas-civ,
+.journey-atlas-pin {
+  cursor: pointer;
+}
+
+.journey-atlas-pin text {
+  pointer-events: none;
+  paint-order: stroke;
+  stroke: rgba(8, 9, 15, 0.45);
+  stroke-width: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .journey-atlas-tilt,
+  .journey-atlas-zoom {
+    transition: none;
+  }
+
+  .journey-atlas-tilt {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    transform: none;
+  }
 }
 
 .map-hud {
@@ -2233,6 +2296,13 @@ button {
     inset: auto;
     border-radius: 1.2rem;
     overflow: hidden;
+  }
+
+  .journey-atlas-tilt {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    transform: none;
   }
 
   .map-tilt-plane {
