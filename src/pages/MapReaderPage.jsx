@@ -44,7 +44,7 @@ function MapReaderPage() {
   const [isLoreExpanded, setIsLoreExpanded] = useState(false)
   const [showRegions, setShowRegions] = useState(true)
   const [selectedCivilization, setSelectedCivilization] = useState(null)
-  const [tiltEnabled, setTiltEnabled] = useState(true)
+  const [tiltEnabled, setTiltEnabled] = useState(false)
   const [atlasZoom, setAtlasZoom] = useState(1)
   const [atlasPan, setAtlasPan] = useState({ x: 0, y: 0 })
 

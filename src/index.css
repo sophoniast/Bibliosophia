@@ -1349,7 +1349,7 @@ button {
   width: 122%;
   height: 122%;
   margin: -8% 0 0 -11%;
-  transform: rotateX(48deg) rotateZ(-8deg);
+  transform: rotateX(30deg) rotateZ(-6deg);
   transform-origin: 50% 58%;
   transform-style: preserve-3d;
   transition: transform 420ms ease;
