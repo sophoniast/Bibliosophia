@@ -1,21 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   BookOpen,
-  Box,
   ChevronRight,
   Crosshair,
-  Layers,
   Minus,
   Pause,
   Play,
   Plus,
   RotateCcw,
   Ruler,
+  Satellite,
   SkipBack,
   SkipForward,
   Sparkles,
 } from 'lucide-react'
-import JourneyAtlas from '../components/JourneyAtlas'
+import JourneyMap from '../components/JourneyMap'
 import SiteFrame from '../components/SiteFrame'
 import { useTheme } from '../context/ThemeContext'
 import { getJourneys } from '../lib/api'
@@ -29,24 +28,25 @@ import {
 
 const PLAYBACK_SPEEDS = [1, 2, 4]
 
+const BASE_LAYERS = [
+  { id: 'satellite', label: 'Satellite' },
+  { id: 'terrain', label: 'Terrain' },
+]
+
 function MapReaderPage() {
   const { mode, palette } = useTheme()
   const playbackRef = useRef({ lastTs: 0, speed: 1 })
+  const mapControlsRef = useRef(null)
 
   const [journeys, setJourneys] = useState([])
   const [isLoaded, setIsLoaded] = useState(false)
   const [activeJourneyId, setActiveJourneyId] = useState(null)
   const [hoveredWaypoint, setHoveredWaypoint] = useState(null)
-  const [hoveredCivilization, setHoveredCivilization] = useState(null)
   const [progress, setProgress] = useState(0)
   const [isPlaying, setIsPlaying] = useState(false)
   const [playbackSpeed, setPlaybackSpeed] = useState(1)
   const [isLoreExpanded, setIsLoreExpanded] = useState(false)
-  const [showRegions, setShowRegions] = useState(true)
-  const [selectedCivilization, setSelectedCivilization] = useState(null)
-  const [tiltEnabled, setTiltEnabled] = useState(true)
-  const [atlasZoom, setAtlasZoom] = useState(1)
-  const [atlasPan, setAtlasPan] = useState({ x: 0, y: 0 })
+  const [baseLayer, setBaseLayer] = useState('satellite')
 
   useEffect(() => {
     let isCancelled = false
@@ -120,8 +120,7 @@ function MapReaderPage() {
   }, [isPlaying, total])
 
   const resetView = useCallback(() => {
-    setAtlasZoom(1)
-    setAtlasPan({ x: 0, y: 0 })
+    mapControlsRef.current?.fitRoute()
   }, [])
 
   const selectWaypoint = useCallback((index, { expandLore = true } = {}) => {
@@ -153,7 +152,6 @@ function MapReaderPage() {
         selectWaypoint(activeJourney.points.length - 1, { expandLore: false })
       } else if (event.key === 'Escape') {
         setIsLoreExpanded(false)
-        setSelectedCivilization(null)
       }
     }
 
@@ -161,12 +159,11 @@ function MapReaderPage() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [activeJourney, selectWaypoint, selectedWaypoint])
 
-  const handleZoomIn = () => setAtlasZoom((current) => Math.min(2.4, Number((current + 0.18).toFixed(2))))
-  const handleZoomOut = () => setAtlasZoom((current) => Math.max(0.72, Number((current - 0.18).toFixed(2))))
+  const handleZoomIn = () => mapControlsRef.current?.zoomIn()
+  const handleZoomOut = () => mapControlsRef.current?.zoomOut()
   const handleReset = () => {
     setIsPlaying(false)
     setProgress(0)
-    setSelectedCivilization(null)
     resetView()
   }
   const handleScrub = (value) => {
@@ -178,31 +175,21 @@ function MapReaderPage() {
     <SiteFrame eyebrow="Geospatial Viewer" title="Cartography Engine">
       <section className="map-page">
         <div className="map-stage glass-panel">
-          <div className="map-tilt-wrapper">
-            <div className="map-tilt-plane">
-              {activeJourney ? (
-                <JourneyAtlas
-                  accent={palette.accent}
-                  activeWaypointIndex={selectedWaypoint}
-                  hoveredCivilization={hoveredCivilization}
-                  journey={activeJourney}
-                  mode={mode}
-                  onHoverCivilization={setHoveredCivilization}
-                  onPanChange={setAtlasPan}
-                  onSelectCivilization={setSelectedCivilization}
-                  onSelectWaypoint={selectWaypoint}
-                  pan={atlasPan}
-                  path={activePath}
-                  progress={progress}
-                  selectedCivilization={selectedCivilization}
-                  showRegions={showRegions}
-                  tilt={tiltEnabled}
-                  zoom={atlasZoom}
-                />
-              ) : (
-                <div className="journey-atlas journey-atlas-placeholder" data-mode={mode} />
-              )}
-            </div>
+          <div className="map-canvas">
+            {activeJourney ? (
+              <JourneyMap
+                accent={palette.accent}
+                activeWaypointIndex={selectedWaypoint}
+                baseLayer={baseLayer}
+                journey={activeJourney}
+                onReady={(controls) => { mapControlsRef.current = controls }}
+                onSelectWaypoint={selectWaypoint}
+                path={activePath}
+                progress={progress}
+              />
+            ) : (
+              <div className="journey-atlas journey-atlas-placeholder" data-mode={mode} />
+            )}
           </div>
 
           {!activeJourney ? (
@@ -227,8 +214,6 @@ function MapReaderPage() {
                       setProgress(0)
                       setIsPlaying(false)
                       setIsLoreExpanded(false)
-                      setSelectedCivilization(null)
-                      resetView()
                     }}
                     value={activeJourneyId || activeJourney.id}
                   >
@@ -254,7 +239,7 @@ function MapReaderPage() {
 
             <div className="map-hud-middle">
               <div className="map-controls">
-                <button className="map-control-button" onClick={resetView} title="Recenter atlas" type="button">
+                <button className="map-control-button" onClick={resetView} title="Fit route" type="button">
                   <Crosshair size={18} />
                 </button>
                 <button className="map-control-button" onClick={handleZoomIn} title="Zoom in" type="button">
@@ -264,20 +249,12 @@ function MapReaderPage() {
                   <Minus size={18} />
                 </button>
                 <button
-                  className={`map-control-button${showRegions ? ' active' : ''}`}
-                  onClick={() => setShowRegions((current) => !current)}
-                  title="Toggle regions"
+                  className={`map-control-button${baseLayer === 'terrain' ? ' active' : ''}`}
+                  onClick={() => setBaseLayer((current) => (current === 'satellite' ? 'terrain' : 'satellite'))}
+                  title={baseLayer === 'satellite' ? 'Switch to terrain basemap' : 'Switch to satellite basemap'}
                   type="button"
                 >
-                  <Layers size={18} />
-                </button>
-                <button
-                  className={`map-control-button${tiltEnabled ? ' active' : ''}`}
-                  onClick={() => setTiltEnabled((current) => !current)}
-                  title={tiltEnabled ? 'Flatten atlas' : 'Tilt atlas'}
-                  type="button"
-                >
-                  <Box size={18} />
+                  <Satellite size={18} />
                 </button>
                 <button
                   className={`map-control-button${isLoreExpanded ? ' active' : ''}`}
@@ -289,20 +266,18 @@ function MapReaderPage() {
                 </button>
               </div>
 
-              {selectedCivilization ? (
-                <aside className="map-region-card map-hud-panel">
-                  <div className="section-kicker">Region</div>
-                  <strong>{selectedCivilization.name}</strong>
-                  <p>{selectedCivilization.area}</p>
+              <div className="map-basemap-toggle map-hud-panel" role="group" aria-label="Basemap">
+                {BASE_LAYERS.map((layer) => (
                   <button
-                    className="map-text-button"
-                    onClick={() => setSelectedCivilization(null)}
+                    key={layer.id}
+                    className={`map-speed-button${baseLayer === layer.id ? ' active' : ''}`}
+                    onClick={() => setBaseLayer(layer.id)}
                     type="button"
                   >
-                    Dismiss
+                    {layer.label}
                   </button>
-                </aside>
-              ) : null}
+                ))}
+              </div>
             </div>
 
             <div className="map-hud-bottom">

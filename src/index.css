@@ -1299,6 +1299,69 @@ button {
   backdrop-filter: blur(8px);
 }
 
+.map-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  isolation: isolate;
+  background:
+    radial-gradient(circle at 18% 20%, rgba(var(--c-accent), 0.12), transparent 32%),
+    linear-gradient(160deg, rgb(var(--c-surface)), rgb(var(--c-bg)));
+}
+
+.journey-map {
+  width: 100%;
+  height: 100%;
+  min-height: 24rem;
+  background: rgb(var(--c-bg));
+}
+
+.journey-map .leaflet-container {
+  width: 100%;
+  height: 100%;
+  background: rgb(var(--c-bg));
+  font-family: var(--f-sans);
+}
+
+.journey-map .leaflet-control-attribution {
+  background: rgba(var(--c-bg), 0.7);
+  color: rgba(var(--c-text), 0.7);
+  font-size: 0.62rem;
+}
+
+.journey-map .leaflet-control-attribution a {
+  color: rgba(var(--c-accent), 0.9);
+}
+
+.journey-map-label {
+  background: rgba(var(--c-bg), 0.82);
+  border: 1px solid rgba(var(--c-accent), 0.4);
+  border-radius: 999px;
+  color: rgb(var(--c-text));
+  font-family: var(--f-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.15rem 0.5rem;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+  white-space: nowrap;
+}
+
+.journey-map-label::before {
+  display: none;
+}
+
+.journey-map-traveler {
+  filter: drop-shadow(0 0 6px rgba(var(--c-accent), 0.8));
+}
+
+.map-basemap-toggle {
+  display: inline-flex;
+  gap: 0.35rem;
+  padding: 0.35rem;
+  border-radius: 999px;
+}
+
 .map-tilt-wrapper {
   position: absolute;
   inset: 0;
@@ -2323,6 +2386,7 @@ button {
     border-radius: 1.2rem;
   }
 
+  .map-canvas,
   .map-tilt-wrapper {
     position: relative;
     height: 52vh;
