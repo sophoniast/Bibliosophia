@@ -401,7 +401,7 @@ function MapReaderPage() {
                       onMouseLeave={() => setHoveredWaypoint((current) => (current === index ? null : current))}
                       type="button"
                     >
-                      <span className="waypoint-index">{String(index + 1).padStart(2, '00')}</span>
+                      <span className="waypoint-index">{String(index + 1).padStart(2, '0')}</span>
                       <strong>{point.name}</strong>
                     </button>
                   ))}
