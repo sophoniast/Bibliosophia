@@ -199,6 +199,10 @@ button {
   z-index: 1;
 }
 
+.page-shell.is-fullbleed {
+  min-height: 100dvh;
+}
+
 .glass-panel {
   background: linear-gradient(180deg, rgba(var(--c-surface), 0.78), rgba(var(--c-surface-alt), 0.54));
   border: 1px solid rgba(var(--c-accent), 0.22);
@@ -308,6 +312,19 @@ button {
   gap: 1rem;
   padding: 1.1rem 1.4rem;
   border-bottom: 1px solid rgba(var(--c-line), 0.08);
+}
+
+.site-header.is-overlay {
+  position: fixed;
+  top: 0.85rem;
+  left: 0.85rem;
+  right: auto;
+  z-index: 530;
+  padding: 0.7rem 0.95rem;
+  border: 1px solid rgba(var(--c-accent), 0.22);
+  border-radius: 1rem;
+  background: rgba(var(--c-bg), 0.62);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
 }
 
 .site-header nav {
@@ -1274,12 +1291,28 @@ button {
   padding: 1.2rem;
 }
 
+.map-page.is-fullbleed {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  padding: 0;
+}
+
 .map-stage {
   position: relative;
   min-height: calc(100vh - 2.4rem);
   border-radius: 1.25rem;
   overflow: hidden;
   background: rgba(var(--c-bg), 0.82);
+}
+
+.map-stage.is-fullbleed {
+  min-height: 100%;
+  height: 100%;
+  border-radius: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
 }
 
 .map-empty {
@@ -1380,7 +1413,7 @@ button {
 .journey-atlas-placeholder {
   width: 100%;
   height: 100%;
-  min-height: 22rem;
+  min-height: 100%;
 }
 
 .journey-atlas-placeholder {
@@ -1391,10 +1424,23 @@ button {
 .journey-atlas-stage {
   width: 100%;
   height: 100%;
-  perspective: 1600px;
+  perspective: 1100px;
+  perspective-origin: 50% 8%;
   overflow: hidden;
   cursor: grab;
   touch-action: none;
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(var(--c-accent), 0.16), transparent 42%),
+    linear-gradient(180deg, #081018 0%, #14110c 55%, #0b0a08 100%);
+}
+
+.journey-atlas-horizon {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 28%;
+  background: linear-gradient(180deg, rgba(8, 16, 24, 0.55), transparent);
+  pointer-events: none;
+  z-index: 2;
 }
 
 .journey-atlas-stage:active {
@@ -1406,16 +1452,21 @@ button {
   height: 100%;
   transform: translate(var(--atlas-x, 0px), var(--atlas-y, 0px)) scale(var(--atlas-zoom, 1));
   transform-origin: center center;
+  transform-style: preserve-3d;
 }
 
 .journey-atlas-tilt {
-  width: 122%;
-  height: 122%;
-  margin: -8% 0 0 -11%;
-  transform: rotateX(48deg) rotateZ(-8deg);
-  transform-origin: 50% 58%;
+  width: 148%;
+  height: 148%;
+  margin: -18% 0 0 -24%;
+  transform: rotateX(var(--atlas-pitch, 56deg)) rotateZ(-12deg);
+  transform-origin: 50% 62%;
   transform-style: preserve-3d;
   transition: transform 420ms ease;
+}
+
+.journey-atlas[data-tilt='off'] {
+  --atlas-pitch: 0deg;
 }
 
 .journey-atlas[data-tilt='off'] .journey-atlas-tilt {
@@ -1425,12 +1476,90 @@ button {
   transform: none;
 }
 
+.atlas-slab {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+}
+
+.atlas-slab-edge {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 22px;
+  transform: rotateX(90deg);
+  transform-origin: bottom center;
+  background: linear-gradient(180deg, #5a4a2e, #1c1610);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+}
+
 .journey-atlas-svg {
   display: block;
   width: 100%;
   height: 100%;
   overflow: visible;
-  filter: drop-shadow(0 28px 48px rgba(0, 0, 0, 0.28));
+  border-radius: 0.4rem;
+  box-shadow: 0 40px 80px rgba(0, 0, 0, 0.42);
+}
+
+.atlas-pin-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  transform: translateZ(18px);
+  transform-style: preserve-3d;
+}
+
+.atlas-pin-3d {
+  position: absolute;
+  display: grid;
+  justify-items: center;
+  gap: 0.15rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  pointer-events: auto;
+  transform: translate(-50%, -100%) rotateX(calc(-1 * var(--atlas-pitch, 56deg)));
+  transform-origin: center bottom;
+}
+
+.atlas-pin-stem {
+  width: 2px;
+  height: 1.35rem;
+  background: rgb(var(--c-accent));
+}
+
+.atlas-pin-head {
+  order: -1;
+  width: 1.35rem;
+  height: 1.35rem;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  border: 2px solid rgb(var(--c-accent));
+  background: rgba(var(--c-bg), 0.88);
+  color: rgb(var(--c-accent));
+  font-family: var(--f-mono);
+  font-size: 0.62rem;
+}
+
+.atlas-pin-3d.is-active .atlas-pin-head {
+  background: rgb(var(--c-accent));
+  color: rgb(var(--c-bg));
+  box-shadow: 0 0 18px rgba(var(--c-accent), 0.45);
+}
+
+.atlas-pin-name {
+  order: -2;
+  max-width: 9rem;
+  color: rgb(var(--c-text));
+  font-family: var(--f-serif);
+  font-size: 0.78rem;
+  text-align: center;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.55);
 }
 
 .journey-atlas-civ,
@@ -1438,24 +1567,10 @@ button {
   cursor: pointer;
 }
 
-.journey-atlas-pin text {
-  pointer-events: none;
-  paint-order: stroke;
-  stroke: rgba(8, 9, 15, 0.45);
-  stroke-width: 3px;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .journey-atlas-tilt,
   .journey-atlas-zoom {
     transition: none;
-  }
-
-  .journey-atlas-tilt {
-    width: 100%;
-    height: 100%;
-    margin: 0;
-    transform: none;
   }
 }
 
@@ -1466,7 +1581,7 @@ button {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 0.75rem;
-  padding: 0.85rem;
+  padding: 5.4rem 0.85rem 0.85rem;
   pointer-events: none;
 }
 
@@ -2375,12 +2490,16 @@ button {
     padding-inline: 1rem;
   }
 
-  .map-page {
+  .map-page:not(.is-fullbleed) {
     padding: 0.75rem;
     padding-bottom: calc(6rem + env(safe-area-inset-bottom));
   }
 
-  .map-stage {
+  .map-page.is-fullbleed {
+    padding: 0;
+  }
+
+  .map-stage:not(.is-fullbleed) {
     min-height: 0;
     overflow: visible;
     border-radius: 1.2rem;
@@ -2388,48 +2507,55 @@ button {
 
   .map-canvas,
   .map-tilt-wrapper {
-    position: relative;
-    height: 52vh;
-    min-height: 24rem;
-    inset: auto;
-    border-radius: 1.2rem;
-    overflow: hidden;
+    position: absolute;
+    inset: 0;
+    height: 100%;
+    min-height: 100%;
+    border-radius: 0;
+  }
+
+  .journey-atlas {
+    --atlas-pitch: 42deg;
   }
 
   .journey-atlas-tilt {
-    width: 100%;
-    height: 100%;
-    margin: 0;
-    transform: none;
+    width: 170%;
+    height: 170%;
+    margin: -22% 0 0 -35%;
+    transform: rotateX(var(--atlas-pitch, 42deg)) rotateZ(-10deg);
+  }
+
+  .map-hud {
+    position: absolute;
+    inset: 0;
+    padding: 5.2rem 0.75rem calc(0.85rem + env(safe-area-inset-bottom));
+  }
+
+  .site-header.is-overlay {
+    top: 0.7rem;
+    left: 0.7rem;
   }
 
   .map-tilt-plane {
     width: 100%;
     height: 100%;
-    border-radius: 1.2rem;
-    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.36);
-  }
-
-  .map-hud {
-    position: relative;
-    inset: auto;
-    padding: 0.85rem 0 0;
-    max-height: none;
-    display: grid;
-    gap: 0.85rem;
+    border-radius: 0;
+    box-shadow: none;
   }
 
   .map-hud-middle {
-    order: -1;
     justify-content: flex-end;
   }
 
   .map-journey-card,
   .map-context-card {
-    max-height: none;
     width: 100%;
-    padding: 0.85rem;
+    padding: 0.75rem 0.85rem;
     border-radius: 1rem;
+  }
+
+  .map-context-card {
+    max-height: min(34vh, 16rem);
   }
 
   .map-journey-select {

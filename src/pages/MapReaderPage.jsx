@@ -174,9 +174,9 @@ function MapReaderPage() {
   }
 
   return (
-    <SiteFrame eyebrow="Geospatial Viewer" title="Cartography Engine">
-      <section className="map-page">
-        <div className="map-stage glass-panel">
+    <SiteFrame fullBleed eyebrow="Geospatial Viewer" title="Cartography Engine">
+      <section className="map-page is-fullbleed">
+        <div className="map-stage is-fullbleed">
           <div className="map-canvas">
             {activeJourney ? (
               <JourneyMap
