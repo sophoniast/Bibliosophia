@@ -3,20 +3,35 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { computePathDistances, getPointAlongPath, getTraveledPath } from '../lib/mapGeometry'
 
-const BASE_LAYERS = {
+// Esri raster basemaps (imagery is theme-independent) plus a place-labels overlay.
+const ESRI_LAYERS = {
   satellite: {
-    label: 'Satellite',
     url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
     attribution: 'Imagery &copy; Esri, Maxar, Earthstar Geographics',
     maxZoom: 18,
     labels: true,
   },
   terrain: {
-    label: 'Terrain',
     url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Terrain_Base/MapServer/tile/{z}/{y}/{x}',
     attribution: 'Terrain &copy; Esri, USGS, NOAA',
     maxZoom: 13,
     labels: true,
+  },
+}
+
+// Vector "Map" basemap that follows the app light/dark theme (CARTO Positron / Dark Matter).
+const VECTOR_LAYERS = {
+  day: {
+    url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+    attribution: '&copy; OpenStreetMap contributors, &copy; CARTO',
+    subdomains: 'abcd',
+    maxZoom: 20,
+  },
+  night: {
+    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    attribution: '&copy; OpenStreetMap contributors, &copy; CARTO',
+    subdomains: 'abcd',
+    maxZoom: 20,
   },
 }
 
@@ -29,10 +44,16 @@ export default function JourneyMap({
   progress = 0,
   accent = '#c9a84c',
   baseLayer = 'satellite',
+  mode = 'night',
   activeWaypointIndex = 0,
   onSelectWaypoint,
   onReady,
 }) {
+  const night = mode === 'night'
+  // Overlay colors adapt for contrast on light vs dark basemaps.
+  const routeBase = night ? 'rgba(255, 255, 255, 0.55)' : 'rgba(33, 35, 46, 0.6)'
+  const markerFill = night ? '#0b0b12' : '#f7f4ec'
+  const markerStroke = night ? '#0b0b12' : '#f7f4ec'
   const containerRef = useRef(null)
   const mapRef = useRef(null)
   const baseLayerRef = useRef(null)
@@ -92,11 +113,15 @@ export default function JourneyMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Swap base tiles (and place labels) when the chosen basemap changes.
+  // Swap base tiles (and place labels) when the basemap or theme changes.
   useEffect(() => {
     const map = mapRef.current
     if (!map) return
-    const config = BASE_LAYERS[baseLayer] || BASE_LAYERS.satellite
+
+    const isVector = baseLayer === 'map'
+    const config = isVector
+      ? VECTOR_LAYERS[night ? 'night' : 'day']
+      : ESRI_LAYERS[baseLayer] || ESRI_LAYERS.satellite
 
     if (baseLayerRef.current) map.removeLayer(baseLayerRef.current)
     if (labelsLayerRef.current) {
@@ -107,15 +132,18 @@ export default function JourneyMap({
     baseLayerRef.current = L.tileLayer(config.url, {
       attribution: config.attribution,
       maxZoom: config.maxZoom,
+      subdomains: config.subdomains || 'abc',
     }).addTo(map)
+    baseLayerRef.current.bringToBack()
 
-    if (config.labels) {
+    // The CARTO vector basemaps already carry labels; only Esri imagery needs the overlay.
+    if (!isVector && config.labels) {
       labelsLayerRef.current = L.tileLayer(LABELS_URL, {
         maxZoom: config.maxZoom,
         opacity: 0.9,
       }).addTo(map)
     }
-  }, [baseLayer])
+  }, [baseLayer, night])
 
   // Draw the route and waypoint markers whenever the journey changes.
   useEffect(() => {
@@ -131,9 +159,9 @@ export default function JourneyMap({
     if (!Array.isArray(path) || path.length < 2) return
 
     routeLineRef.current = L.polyline(path, {
-      color: '#ffffff',
+      color: routeBase,
       weight: 3,
-      opacity: 0.55,
+      opacity: 0.7,
       dashArray: '2 9',
       lineCap: 'round',
     }).addTo(map)
@@ -154,7 +182,7 @@ export default function JourneyMap({
           radius: 7,
           color: accent,
           weight: 2.5,
-          fillColor: '#0b0b12',
+          fillColor: markerFill,
           fillOpacity: 0.9,
         })
           .bindTooltip(point.name, {
@@ -170,7 +198,7 @@ export default function JourneyMap({
 
     travelerRef.current = L.circleMarker(path[0], {
       radius: 8,
-      color: '#0b0b12',
+      color: markerStroke,
       weight: 2,
       fillColor: accent,
       fillOpacity: 1,
@@ -195,18 +223,23 @@ export default function JourneyMap({
     if (travelerRef.current && head) travelerRef.current.setLatLng(head)
   }, [progress, path, distances, total])
 
-  // Emphasize the active waypoint marker.
+  // Re-color the route/markers for the active waypoint and the light/dark theme.
   useEffect(() => {
+    if (routeLineRef.current) routeLineRef.current.setStyle({ color: routeBase })
+    if (traveledLineRef.current) traveledLineRef.current.setStyle({ color: accent })
+    if (travelerRef.current) travelerRef.current.setStyle({ fillColor: accent, color: markerStroke })
     markersRef.current.forEach((marker, index) => {
       const active = index === activeWaypointIndex
       marker.setStyle({
         radius: active ? 10 : 7,
-        fillColor: active ? accent : '#0b0b12',
+        color: accent,
         weight: active ? 3 : 2.5,
+        fillColor: active ? accent : markerFill,
+        fillOpacity: 0.9,
       })
       if (active) marker.bringToFront()
     })
-  }, [activeWaypointIndex, accent])
+  }, [activeWaypointIndex, accent, routeBase, markerFill, markerStroke])
 
   return <div ref={containerRef} className="journey-map" aria-label={`${journey?.title || 'Biblical'} route map`} />
 }

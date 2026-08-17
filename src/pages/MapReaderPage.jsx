@@ -6,13 +6,14 @@ import {
   Minus,
   Pause,
   Play,
+  Moon,
   Plus,
   RotateCcw,
   Ruler,
-  Satellite,
   SkipBack,
   SkipForward,
   Sparkles,
+  Sun,
 } from 'lucide-react'
 import JourneyMap from '../components/JourneyMap'
 import SiteFrame from '../components/SiteFrame'
@@ -29,12 +30,13 @@ import {
 const PLAYBACK_SPEEDS = [1, 2, 4]
 
 const BASE_LAYERS = [
+  { id: 'map', label: 'Map' },
   { id: 'satellite', label: 'Satellite' },
   { id: 'terrain', label: 'Terrain' },
 ]
 
 function MapReaderPage() {
-  const { mode, palette } = useTheme()
+  const { mode, palette, toggleMode } = useTheme()
   const playbackRef = useRef({ lastTs: 0, speed: 1 })
   const mapControlsRef = useRef(null)
 
@@ -182,6 +184,7 @@ function MapReaderPage() {
                 activeWaypointIndex={selectedWaypoint}
                 baseLayer={baseLayer}
                 journey={activeJourney}
+                mode={mode}
                 onReady={(controls) => { mapControlsRef.current = controls }}
                 onSelectWaypoint={selectWaypoint}
                 path={activePath}
@@ -249,12 +252,12 @@ function MapReaderPage() {
                   <Minus size={18} />
                 </button>
                 <button
-                  className={`map-control-button${baseLayer === 'terrain' ? ' active' : ''}`}
-                  onClick={() => setBaseLayer((current) => (current === 'satellite' ? 'terrain' : 'satellite'))}
-                  title={baseLayer === 'satellite' ? 'Switch to terrain basemap' : 'Switch to satellite basemap'}
+                  className="map-control-button"
+                  onClick={toggleMode}
+                  title={mode === 'night' ? 'Switch to light theme' : 'Switch to dark theme'}
                   type="button"
                 >
-                  <Satellite size={18} />
+                  {mode === 'night' ? <Sun size={18} /> : <Moon size={18} />}
                 </button>
                 <button
                   className={`map-control-button${isLoreExpanded ? ' active' : ''}`}
