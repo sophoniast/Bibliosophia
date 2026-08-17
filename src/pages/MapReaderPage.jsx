@@ -48,7 +48,7 @@ function MapReaderPage() {
   const [isPlaying, setIsPlaying] = useState(false)
   const [playbackSpeed, setPlaybackSpeed] = useState(1)
   const [isLoreExpanded, setIsLoreExpanded] = useState(false)
-  const [baseLayer, setBaseLayer] = useState('satellite')
+  const [baseLayer, setBaseLayer] = useState('map')
 
   useEffect(() => {
     let isCancelled = false

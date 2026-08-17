@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { computePathDistances, getPointAlongPath, getTraveledPath } from '../lib/mapGeometry'
+import { HISTORICAL_REGIONS, HISTORICAL_WATERS, getModernName } from '../data/historicalGeography'
 
 // Esri raster basemaps (imagery is theme-independent) plus a place-labels overlay.
 const ESRI_LAYERS = {
@@ -20,19 +21,29 @@ const ESRI_LAYERS = {
 }
 
 // Vector "Map" basemap that follows the app light/dark theme (CARTO Positron / Dark Matter).
+// The label-free variants are used so modern place names don't compete with the
+// biblical-era labels drawn on top; modern names appear only as secondary references.
 const VECTOR_LAYERS = {
   day: {
-    url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+    url: 'https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png',
     attribution: '&copy; OpenStreetMap contributors, &copy; CARTO',
     subdomains: 'abcd',
     maxZoom: 20,
   },
   night: {
-    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    url: 'https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png',
     attribution: '&copy; OpenStreetMap contributors, &copy; CARTO',
     subdomains: 'abcd',
     maxZoom: 20,
   },
+}
+
+function historicalIcon(entry, variant) {
+  return L.divIcon({
+    className: 'journey-map-region-icon',
+    html: `<div class="hist-label ${variant}"><span class="hist">${entry.name}</span><span class="modern">${entry.modern}</span></div>`,
+    iconSize: null,
+  })
 }
 
 const LABELS_URL =
@@ -62,6 +73,7 @@ export default function JourneyMap({
   const traveledLineRef = useRef(null)
   const travelerRef = useRef(null)
   const markersRef = useRef([])
+  const historicalLayerRef = useRef(null)
   const boundsRef = useRef(null)
   const selectRef = useRef(onSelectWaypoint)
 
@@ -93,6 +105,25 @@ export default function JourneyMap({
       },
     })
 
+    // Persistent biblical-era geography: ancient region/"country" and water names
+    // as the primary labels, with the modern name as a secondary reference.
+    const historical = L.layerGroup().addTo(map)
+    historicalLayerRef.current = historical
+    HISTORICAL_REGIONS.forEach((region) => {
+      L.marker([region.lat, region.lon], {
+        interactive: false,
+        keyboard: false,
+        icon: historicalIcon(region, 'region'),
+      }).addTo(historical)
+    })
+    HISTORICAL_WATERS.forEach((water) => {
+      L.marker([water.lat, water.lon], {
+        interactive: false,
+        keyboard: false,
+        icon: historicalIcon(water, 'water'),
+      }).addTo(historical)
+    })
+
     // Leaflet needs a sizing nudge once it is laid out inside the flex panel.
     const invalidate = () => map.invalidateSize()
     const raf = window.requestAnimationFrame(invalidate)
@@ -109,6 +140,7 @@ export default function JourneyMap({
       traveledLineRef.current = null
       travelerRef.current = null
       markersRef.current = []
+      historicalLayerRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -178,6 +210,10 @@ export default function JourneyMap({
     markersRef.current = points
       .filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lon))
       .map((point, index) => {
+        const modern = getModernName(point.name)
+        const tooltipHtml = `<span class="hist">${point.name}</span>${
+          modern ? `<span class="modern">${modern}</span>` : ''
+        }`
         const marker = L.circleMarker([point.lat, point.lon], {
           radius: 7,
           color: accent,
@@ -185,7 +221,7 @@ export default function JourneyMap({
           fillColor: markerFill,
           fillOpacity: 0.9,
         })
-          .bindTooltip(point.name, {
+          .bindTooltip(tooltipHtml, {
             permanent: true,
             direction: 'top',
             offset: [0, -8],
