@@ -49,6 +49,10 @@ function historicalIcon(entry, variant) {
 const LABELS_URL =
   'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}'
 
+// Leave room for the header overlay (top) and the timeline/HUD panel (bottom) so
+// the first/last waypoint labels aren't hidden behind the chrome.
+const FIT_OPTIONS = { paddingTopLeft: [40, 120], paddingBottomRight: [40, 210] }
+
 export default function JourneyMap({
   journey,
   path,
@@ -101,7 +105,7 @@ export default function JourneyMap({
       zoomIn: () => map.zoomIn(),
       zoomOut: () => map.zoomOut(),
       fitRoute: () => {
-        if (boundsRef.current) map.fitBounds(boundsRef.current, { padding: [60, 60] })
+        if (boundsRef.current) map.fitBounds(boundsRef.current, FIT_OPTIONS)
       },
     })
 
@@ -242,7 +246,7 @@ export default function JourneyMap({
     }).addTo(map)
 
     boundsRef.current = L.latLngBounds(path)
-    map.fitBounds(boundsRef.current, { padding: [60, 60] })
+    map.fitBounds(boundsRef.current, FIT_OPTIONS)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [journey?.id, path, accent])
 
