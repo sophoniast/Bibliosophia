@@ -103,6 +103,11 @@ class AppErrorBoundary extends Component {
   }
 }
 
+function RouteErrorBoundary({ children }) {
+  const location = useLocation()
+  return <AppErrorBoundary key={location.pathname}>{children}</AppErrorBoundary>
+}
+
 function App() {
   return (
     <AuthProvider>
@@ -111,7 +116,7 @@ function App() {
           <AmbientBackdrop />
           <AppMenu />
           <ThemeDock />
-          <AppErrorBoundary>
+          <RouteErrorBoundary>
             <Suspense fallback={<div className="route-loading">Loading Bibliosophia...</div>}>
               <Routes>
                 <Route path="/" element={<HomePage />} />
@@ -121,7 +126,7 @@ function App() {
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </Suspense>
-          </AppErrorBoundary>
+          </RouteErrorBoundary>
         </BrowserRouter>
       </ThemeProvider>
     </AuthProvider>
