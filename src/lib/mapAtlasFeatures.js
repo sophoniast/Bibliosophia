@@ -187,3 +187,29 @@ export const LAND_TONES = {
   africa: { day: '#e0c48a', night: '#7a643c' },
   desert: { day: '#edd6a2', night: '#8a7044' },
 }
+
+export const DECORATIONS = {
+  compass: { lat: 27.2, lon: 19.4 },
+  boat: { lat: 34.6, lon: 19.8 },
+  cartouche: { lat: 44.2, lon: 12.2 },
+}
+
+export function mountainHatches(ridges) {
+  return ridges.flatMap((ridge) => {
+    const marks = []
+    for (let i = 0; i < ridge.points.length - 1; i += 1) {
+      const [lat1, lon1] = ridge.points[i]
+      const [lat2, lon2] = ridge.points[i + 1]
+      const steps = 4
+      for (let step = 0; step < steps; step += 1) {
+        const t = step / steps
+        marks.push({
+          id: `${ridge.id}-${i}-${step}`,
+          lat: lat1 + (lat2 - lat1) * t,
+          lon: lon1 + (lon2 - lon1) * t,
+        })
+      }
+    }
+    return marks
+  })
+}

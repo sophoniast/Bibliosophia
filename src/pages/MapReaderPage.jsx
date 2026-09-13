@@ -42,7 +42,7 @@ function MapReaderPage() {
   const [isPlaying, setIsPlaying] = useState(false)
   const [playbackSpeed, setPlaybackSpeed] = useState(1)
   const [isLoreExpanded, setIsLoreExpanded] = useState(false)
-  const [showRegions, setShowRegions] = useState(true)
+  const [showRegions, setShowRegions] = useState(false)
   const [selectedCivilization, setSelectedCivilization] = useState(null)
   const [tiltEnabled, setTiltEnabled] = useState(true)
   const [atlasZoom, setAtlasZoom] = useState(1)

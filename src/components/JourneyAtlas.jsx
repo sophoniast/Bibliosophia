@@ -2,18 +2,17 @@ import { useEffect, useId, useMemo, useRef } from 'react'
 import { animate, createScope, createTimeline, svg } from 'animejs'
 import { computePathDistances, getPointAlongPath, prefersReducedMotion } from '../lib/mapGeometry'
 import {
-  LANDS,
-  LAND_TONES,
+  DECORATIONS,
   MOUNTAINS,
   REGION_LABELS,
   RIVERS,
   SEAS,
   SEA_LABELS,
+  mountainHatches,
 } from '../lib/mapAtlasFeatures'
 import { ATLAS_BOUNDS, ATLAS_SIZE, pointsToPath, projectPoint } from '../lib/mapProjection'
 
 const { width: W, height: H } = ATLAS_SIZE
-const EXTRUDE_STEPS = [5, 4, 3, 2, 1]
 
 function pathD(points, close = false) {
   return pointsToPath(points, W, H, ATLAS_BOUNDS, close)
@@ -23,8 +22,22 @@ function civKey(civilization) {
   return civilization.id || civilization.name
 }
 
-function landFill(tone, night) {
-  return LAND_TONES[tone]?.[night ? 'night' : 'day'] || LAND_TONES.levant[night ? 'night' : 'day']
+function themeColors(mode, accent) {
+  const night = mode === 'night'
+  return {
+    night,
+    paper: night ? '#1b1710' : '#f3e4c4',
+    paperAlt: night ? '#241e14' : '#ead6ae',
+    sea: night ? '#2d4a52' : '#b9cfd4',
+    seaEdge: night ? 'rgba(186, 214, 220, 0.28)' : 'rgba(72, 96, 104, 0.28)',
+    ink: night ? 'rgba(236, 228, 208, 0.88)' : 'rgba(58, 42, 26, 0.82)',
+    muted: night ? 'rgba(214, 201, 168, 0.48)' : 'rgba(92, 72, 48, 0.42)',
+    hatch: night ? 'rgba(92, 74, 48, 0.7)' : 'rgba(110, 84, 52, 0.38)',
+    river: night ? '#7ea8b0' : '#6a8f96',
+    routeRemain: night ? 'rgba(236, 228, 208, 0.28)' : 'rgba(72, 56, 36, 0.22)',
+    pinFill: night ? '#1b1710' : '#f7edd6',
+    accent,
+  }
 }
 
 export default function JourneyAtlas({
@@ -57,27 +70,19 @@ export default function JourneyAtlas({
   const dragRef = useRef(null)
   const fallbackRef = useRef(null)
   const reduceMotionRef = useRef(prefersReducedMotion())
+  const colors = themeColors(mode, accent)
 
   const distances = useMemo(() => computePathDistances(path), [path])
   const routeD = useMemo(() => (path?.length >= 2 ? pathD(path, false) : ''), [path])
-  const landPaths = useMemo(
-    () => LANDS.map((land) => ({ ...land, d: pathD(land.points, true) })),
-    [],
-  )
-  const inlandSeas = useMemo(
-    () => SEAS
-      .filter((sea) => sea.id === 'caspian' || sea.id === 'dead-sea')
-      .map((sea) => ({ ...sea, d: pathD(sea.points, true) })),
+  const seaPaths = useMemo(
+    () => SEAS.map((sea) => ({ ...sea, d: pathD(sea.points, true) })),
     [],
   )
   const riverPaths = useMemo(
     () => RIVERS.map((river) => ({ ...river, d: pathD(river.points, false) })),
     [],
   )
-  const mountainPaths = useMemo(
-    () => MOUNTAINS.map((ridge) => ({ ...ridge, d: pathD(ridge.points, false) })),
-    [],
-  )
+  const hatches = useMemo(() => mountainHatches(MOUNTAINS), [])
   const civPaths = useMemo(
     () => (journey?.civilizations || [])
       .filter((civ) => Array.isArray(civ.bounds) && civ.bounds.length >= 3)
@@ -104,11 +109,6 @@ export default function JourneyAtlas({
   const [travelerX, travelerY] = travelerPoint
     ? projectPoint(travelerPoint[0], travelerPoint[1], W, H, ATLAS_BOUNDS)
     : [W / 2, H / 2]
-
-  const night = mode === 'night'
-  const ocean = night ? '#15242c' : '#7ea8b0'
-  const ink = night ? 'rgba(236, 228, 208, 0.92)' : 'rgba(42, 34, 22, 0.88)'
-  const muted = night ? 'rgba(214, 201, 168, 0.55)' : 'rgba(72, 60, 40, 0.5)'
   const selectedCivId = selectedCivilization ? civKey(selectedCivilization) : null
   const morphActive = Boolean(hoveredCivilization || selectedCivId)
 
@@ -209,8 +209,8 @@ export default function JourneyAtlas({
       if (!el) return null
       return animate(svg.createDrawable(el), {
         draw: ['0 0', '0 1'],
-        duration: 1400,
-        delay: 160 + index * 110,
+        duration: 1600,
+        delay: 180 + index * 120,
         ease: 'inOut(2)',
       })
     })
@@ -219,7 +219,7 @@ export default function JourneyAtlas({
 
   const handlePointerDown = (event) => {
     if (!onPanChange) return
-    if (event.target.closest('.journey-atlas-pin, .journey-atlas-civ, .atlas-pin-3d')) return
+    if (event.target.closest('.parchment-pin, .journey-atlas-civ')) return
     dragRef.current = {
       x: event.clientX - pan.x,
       y: event.clientY - pan.y,
@@ -240,16 +240,20 @@ export default function JourneyAtlas({
     dragRef.current = null
   }
 
+  const [compassX, compassY] = projectPoint(DECORATIONS.compass.lat, DECORATIONS.compass.lon, W, H, ATLAS_BOUNDS)
+  const [boatX, boatY] = projectPoint(DECORATIONS.boat.lat, DECORATIONS.boat.lon, W, H, ATLAS_BOUNDS)
+
   return (
     <div
-      className="journey-atlas"
+      className="journey-atlas parchment-atlas"
       data-mode={mode}
       data-tilt={tilt ? 'on' : 'off'}
       style={{
         '--atlas-zoom': zoom,
         '--atlas-x': `${pan.x}px`,
         '--atlas-y': `${pan.y}px`,
-        '--atlas-pitch': tilt ? '56deg' : '0deg',
+        '--atlas-pitch': tilt ? '32deg' : '0deg',
+        '--atlas-accent': accent,
       }}
     >
       <div
@@ -259,81 +263,83 @@ export default function JourneyAtlas({
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
       >
-        <div className="journey-atlas-horizon" aria-hidden="true" />
         <div className="journey-atlas-zoom">
           <div className="journey-atlas-tilt">
-            <div className="atlas-slab">
-              <div className="atlas-slab-edge" aria-hidden="true" />
+            <div className="parchment-sheet">
               <svg
                 ref={svgRef}
                 className="journey-atlas-svg"
                 viewBox={`0 0 ${W} ${H}`}
                 role="img"
-                aria-label={`${journey?.title || 'Biblical'} atlas of the eastern Mediterranean`}
+                aria-label={`${journey?.title || 'Biblical'} parchment atlas`}
               >
                 <defs>
-                  <linearGradient id={`${uid}-ocean`} x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={night ? '#0d1c24' : '#8fb6bd'} />
-                    <stop offset="100%" stopColor={ocean} />
+                  <linearGradient id={`${uid}-paper`} x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0%" stopColor={colors.paper} />
+                    <stop offset="55%" stopColor={colors.paperAlt} />
+                    <stop offset="100%" stopColor={colors.paper} />
                   </linearGradient>
+                  <radialGradient id={`${uid}-sea`} cx="40%" cy="35%" r="75%">
+                    <stop offset="0%" stopColor={colors.sea} stopOpacity="0.92" />
+                    <stop offset="100%" stopColor={colors.sea} stopOpacity="0.72" />
+                  </radialGradient>
                   <radialGradient id={`${uid}-glow`} cx="50%" cy="50%" r="50%">
-                    <stop offset="0%" stopColor={accent} stopOpacity="0.9" />
+                    <stop offset="0%" stopColor={accent} stopOpacity="0.95" />
                     <stop offset="100%" stopColor={accent} stopOpacity="0" />
                   </radialGradient>
-                  <pattern id={`${uid}-grid`} width="80" height="80" patternUnits="userSpaceOnUse">
-                    <path d="M 80 0 L 0 0 0 80" fill="none" stroke={accent} strokeOpacity="0.08" strokeWidth="0.8" />
-                  </pattern>
-                  <filter id={`${uid}-soft`} x="-20%" y="-20%" width="140%" height="140%">
-                    <feGaussianBlur stdDeviation="1.1" />
+                  <filter id={`${uid}-grain`} x="0" y="0" width="100%" height="100%">
+                    <feTurbulence type="fractalNoise" baseFrequency="0.75" numOctaves="2" result="noise" />
+                    <feColorMatrix type="saturate" values="0" />
+                    <feComponentTransfer>
+                      <feFuncA type="table" tableValues="0 0.18" />
+                    </feComponentTransfer>
+                    <feBlend in="SourceGraphic" mode="multiply" />
+                  </filter>
+                  <filter id={`${uid}-soft`} x="-30%" y="-30%" width="160%" height="160%">
+                    <feGaussianBlur stdDeviation="1.4" />
                   </filter>
                 </defs>
 
-                <rect width={W} height={H} fill={`url(#${uid}-ocean)`} />
-                <rect width={W} height={H} fill={`url(#${uid}-grid)`} />
+                <rect width={W} height={H} fill={`url(#${uid}-paper)`} filter={`url(#${uid}-grain)`} />
 
-                {landPaths.map((land) => (
-                  <g key={`${land.id}-extrude`} className="atlas-land-extrude">
-                    {EXTRUDE_STEPS.map((step) => (
-                      <path
-                        key={`${land.id}-${step}`}
-                        d={land.d}
-                        transform={`translate(0 ${step * 1.5})`}
-                        fill={night ? '#2a2216' : '#8a7348'}
-                      />
-                    ))}
-                  </g>
-                ))}
+                <text
+                  x={W * 0.62}
+                  y={H * 0.72}
+                  textAnchor="middle"
+                  fill={colors.ink}
+                  fontFamily="var(--f-serif)"
+                  fontSize="92"
+                  letterSpacing="18"
+                  opacity="0.06"
+                >
+                  BIBLIOSOPHIA
+                </text>
 
-                {landPaths.map((land) => (
+                {seaPaths.map((sea) => (
                   <path
-                    key={land.id}
-                    d={land.d}
-                    fill={landFill(land.tone, night)}
-                    stroke={night ? 'rgba(236, 228, 208, 0.18)' : 'rgba(72, 56, 28, 0.28)'}
-                    strokeWidth="1.2"
+                    key={sea.id}
+                    d={sea.d}
+                    fill={`url(#${uid}-sea)`}
+                    stroke={colors.seaEdge}
+                    strokeWidth="1.1"
                   >
-                    <title>{land.name}</title>
-                  </path>
-                ))}
-
-                {inlandSeas.map((sea) => (
-                  <path key={sea.id} d={sea.d} fill={ocean} stroke={accent} strokeOpacity="0.16" strokeWidth="0.8">
                     <title>{sea.label}</title>
                   </path>
                 ))}
 
-                {mountainPaths.map((ridge) => (
-                  <path
-                    key={ridge.id}
-                    d={ridge.d}
-                    fill="none"
-                    stroke={night ? 'rgba(48, 36, 20, 0.7)' : 'rgba(92, 68, 32, 0.45)'}
-                    strokeWidth="2.2"
-                    strokeLinecap="round"
-                  >
-                    <title>{ridge.label}</title>
-                  </path>
-                ))}
+                {hatches.map((mark) => {
+                  const [x, y] = projectPoint(mark.lat, mark.lon, W, H, ATLAS_BOUNDS)
+                  return (
+                    <path
+                      key={mark.id}
+                      d={`M ${x - 4} ${y + 3} L ${x} ${y - 5} L ${x + 4} ${y + 3}`}
+                      fill="none"
+                      stroke={colors.hatch}
+                      strokeWidth="1.1"
+                      strokeLinecap="round"
+                    />
+                  )
+                })}
 
                 {riverPaths.map((river) => (
                   <path
@@ -341,9 +347,8 @@ export default function JourneyAtlas({
                     data-river={river.id}
                     d={river.d}
                     fill="none"
-                    stroke={night ? '#7aa8b0' : '#3f7380'}
-                    strokeOpacity="0.85"
-                    strokeWidth="1.8"
+                    stroke={colors.river}
+                    strokeWidth="1.5"
                     strokeLinecap="round"
                   >
                     <title>{river.label}</title>
@@ -358,10 +363,10 @@ export default function JourneyAtlas({
                         key={civ.id}
                         className="journey-atlas-civ"
                         d={civ.d}
-                        fill={active ? `${civ.color || accent}55` : `${civ.color || accent}22`}
+                        fill={active ? `${civ.color || accent}33` : `${civ.color || accent}12`}
                         stroke={civ.color || accent}
-                        strokeOpacity={active ? 0.9 : 0.4}
-                        strokeWidth={active ? 2.4 : 1.2}
+                        strokeOpacity={active ? 0.55 : 0.18}
+                        strokeWidth={active ? 1.6 : 0.9}
                         onMouseEnter={() => onHoverCivilization?.(civ.id)}
                         onMouseLeave={() => onHoverCivilization?.(null)}
                         onClick={() => onSelectCivilization?.(civ)}
@@ -372,16 +377,16 @@ export default function JourneyAtlas({
                   })
                   : null}
 
-                <path ref={morphTargetRef} d={civPaths[0]?.d || landPaths[0]?.d} fill="none" opacity="0" pointerEvents="none" />
+                <path ref={morphTargetRef} d={civPaths[0]?.d || seaPaths[0]?.d} fill="none" opacity="0" pointerEvents="none" />
                 <path
                   ref={morphRef}
                   className="journey-atlas-morph"
-                  d={civPaths[0]?.d || landPaths[0]?.d}
+                  d={civPaths[0]?.d || seaPaths[0]?.d}
                   fill="none"
                   stroke={accent}
-                  strokeWidth="2.6"
-                  strokeDasharray="6 8"
-                  opacity={morphActive ? 0.8 : 0}
+                  strokeWidth="1.8"
+                  strokeDasharray="5 7"
+                  opacity={morphActive ? 0.55 : 0}
                   pointerEvents="none"
                 />
 
@@ -389,12 +394,11 @@ export default function JourneyAtlas({
                   <path
                     d={routeD}
                     fill="none"
-                    stroke={muted}
-                    strokeWidth="3.4"
+                    stroke={colors.routeRemain}
+                    strokeWidth="2.2"
                     strokeLinecap="round"
                     strokeLinejoin="round"
-                    strokeDasharray="8 10"
-                    opacity="0.55"
+                    strokeDasharray="3 7"
                   />
                 ) : null}
                 {routeD ? (
@@ -403,29 +407,24 @@ export default function JourneyAtlas({
                     d={routeD}
                     fill="none"
                     stroke={accent}
-                    strokeWidth="3.8"
+                    strokeWidth="2.8"
                     strokeLinecap="round"
                     strokeLinejoin="round"
                     filter={`url(#${uid}-soft)`}
                   />
                 ) : null}
 
-                <g
-                  ref={travelerRef}
-                  className="journey-atlas-traveler"
-                  style={{ transformBox: 'fill-box', transformOrigin: 'center', visibility: 'hidden' }}
-                >
-                  <circle r="16" fill={`url(#${uid}-glow)`} />
-                  <circle r="5.5" fill={accent} stroke={ink} strokeWidth="1.2" />
-                  <polygon points="0,-13 4,-2 -4,-2" fill={accent} />
+                <g className="parchment-boat" transform={`translate(${boatX} ${boatY})`} opacity="0.55">
+                  <path d="M -14 4 L 14 4 L 8 10 L -8 10 Z" fill={colors.ink} />
+                  <path d="M 0 4 L 0 -12 L 10 -2 Z" fill={colors.pinFill} stroke={colors.ink} strokeWidth="1" />
                 </g>
-                <g
-                  ref={fallbackRef}
-                  className="journey-atlas-traveler-fallback"
-                  transform={`translate(${travelerX} ${travelerY})`}
-                >
-                  <circle r="16" fill={`url(#${uid}-glow)`} />
-                  <circle r="5.5" fill={accent} stroke={ink} strokeWidth="1.2" />
+
+                <g className="parchment-compass" transform={`translate(${compassX} ${compassY})`} opacity="0.62">
+                  <circle r="18" fill="none" stroke={colors.ink} strokeWidth="1" />
+                  <circle r="3" fill={colors.ink} />
+                  <path d="M 0 -16 L 4 0 L 0 16 L -4 0 Z" fill={accent} opacity="0.85" />
+                  <path d="M -16 0 L 0 -4 L 16 0 L 0 4 Z" fill={colors.ink} opacity="0.45" />
+                  <text y="-22" textAnchor="middle" fill={colors.ink} fontSize="8" fontFamily="var(--f-mono)">N</text>
                 </g>
 
                 {REGION_LABELS.map((label) => {
@@ -436,11 +435,11 @@ export default function JourneyAtlas({
                       x={x}
                       y={y}
                       textAnchor="middle"
-                      fill={ink}
-                      fontSize="13"
-                      letterSpacing="2"
+                      fill={colors.ink}
+                      fontSize="14"
+                      letterSpacing="2.2"
                       fontFamily="var(--f-serif)"
-                      opacity="0.72"
+                      opacity="0.55"
                     >
                       {label.name}
                     </text>
@@ -455,38 +454,59 @@ export default function JourneyAtlas({
                       x={x}
                       y={y}
                       textAnchor="middle"
-                      fill={night ? 'rgba(186, 214, 220, 0.55)' : 'rgba(28, 52, 58, 0.45)'}
+                      fill={colors.muted}
                       fontSize="11"
-                      letterSpacing="1.8"
-                      fontFamily="var(--f-mono)"
+                      letterSpacing="2.4"
+                      fontFamily="var(--f-serif)"
+                      fontStyle="italic"
                     >
-                      {label.name.toUpperCase()}
+                      {label.name}
                     </text>
                   )
                 })}
-              </svg>
 
-              <div className="atlas-pin-layer">
                 {pins.map((pin) => {
                   const active = pin.index === activeWaypointIndex
                   return (
-                    <button
+                    <g
                       key={`${pin.waypoint.name}-${pin.index}`}
-                      className={`atlas-pin-3d${active ? ' is-active' : ''}`}
+                      className={`parchment-pin${active ? ' is-active' : ''}`}
+                      transform={`translate(${pin.x} ${pin.y})`}
+                      role="button"
+                      tabIndex={0}
                       onClick={() => onSelectWaypoint?.(pin.index)}
-                      style={{
-                        left: `${(pin.x / W) * 100}%`,
-                        top: `${(pin.y / H) * 100}%`,
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault()
+                          onSelectWaypoint?.(pin.index)
+                        }
                       }}
-                      type="button"
                     >
-                      <span className="atlas-pin-stem" />
-                      <span className="atlas-pin-head">{pin.index + 1}</span>
-                      <span className="atlas-pin-name">{pin.waypoint.name}</span>
-                    </button>
+                      <circle r={active ? 7 : 4.5} fill={active ? colors.pinFill : colors.ink} stroke={active ? accent : colors.ink} strokeWidth={active ? 2.4 : 1} />
+                      <text y="-12" textAnchor="middle" fill={colors.ink} fontSize="13" fontFamily="var(--f-serif)">
+                        {pin.waypoint.name}
+                      </text>
+                    </g>
                   )
                 })}
-              </div>
+
+                <g
+                  ref={travelerRef}
+                  className="journey-atlas-traveler"
+                  style={{ transformBox: 'fill-box', transformOrigin: 'center', visibility: 'hidden' }}
+                >
+                  <circle r="18" fill={`url(#${uid}-glow)`} />
+                  <circle r="5" fill={colors.pinFill} stroke={accent} strokeWidth="2.2" />
+                </g>
+                <g
+                  ref={fallbackRef}
+                  className="journey-atlas-traveler-fallback"
+                  transform={`translate(${travelerX} ${travelerY})`}
+                >
+                  <circle r="18" fill={`url(#${uid}-glow)`} />
+                  <circle r="5" fill={colors.pinFill} stroke={accent} strokeWidth="2.2" />
+                </g>
+              </svg>
             </div>
           </div>
         </div>

@@ -1361,23 +1361,14 @@ button {
 .journey-atlas-stage {
   width: 100%;
   height: 100%;
-  perspective: 1100px;
-  perspective-origin: 50% 8%;
+  perspective: 1600px;
+  perspective-origin: 50% 18%;
   overflow: hidden;
   cursor: grab;
   touch-action: none;
   background:
-    radial-gradient(ellipse at 50% 0%, rgba(var(--c-accent), 0.16), transparent 42%),
-    linear-gradient(180deg, #081018 0%, #14110c 55%, #0b0a08 100%);
-}
-
-.journey-atlas-horizon {
-  position: absolute;
-  inset: 0 0 auto;
-  height: 28%;
-  background: linear-gradient(180deg, rgba(8, 16, 24, 0.55), transparent);
-  pointer-events: none;
-  z-index: 2;
+    radial-gradient(ellipse at 50% 30%, rgba(var(--c-accent), 0.08), transparent 46%),
+    linear-gradient(180deg, rgb(var(--c-bg)) 0%, rgb(var(--c-surface)) 100%);
 }
 
 .journey-atlas-stage:active {
@@ -1393,11 +1384,11 @@ button {
 }
 
 .journey-atlas-tilt {
-  width: 148%;
-  height: 148%;
-  margin: -18% 0 0 -24%;
-  transform: rotateX(var(--atlas-pitch, 56deg)) rotateZ(-12deg);
-  transform-origin: 50% 62%;
+  width: 118%;
+  height: 118%;
+  margin: -6% 0 0 -9%;
+  transform: rotateX(var(--atlas-pitch, 32deg)) rotateZ(-6deg);
+  transform-origin: 50% 58%;
   transform-style: preserve-3d;
   transition: transform 420ms ease;
 }
@@ -1413,23 +1404,20 @@ button {
   transform: none;
 }
 
-.atlas-slab {
-  position: relative;
+.parchment-sheet {
   width: 100%;
   height: 100%;
-  transform-style: preserve-3d;
+  border-radius: 0.35rem;
+  overflow: hidden;
+  box-shadow:
+    0 28px 70px rgba(0, 0, 0, 0.38),
+    0 2px 0 rgba(255, 236, 196, 0.08) inset;
 }
 
-.atlas-slab-edge {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 22px;
-  transform: rotateX(90deg);
-  transform-origin: bottom center;
-  background: linear-gradient(180deg, #5a4a2e, #1c1610);
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+[data-mode='night'] .parchment-sheet {
+  box-shadow:
+    0 28px 70px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(var(--c-accent), 0.08);
 }
 
 .journey-atlas-svg {
@@ -1437,70 +1425,20 @@ button {
   width: 100%;
   height: 100%;
   overflow: visible;
-  border-radius: 0.4rem;
-  box-shadow: 0 40px 80px rgba(0, 0, 0, 0.42);
 }
 
-.atlas-pin-layer {
-  position: absolute;
-  inset: 0;
+.parchment-pin {
+  cursor: pointer;
+}
+
+.parchment-pin text {
   pointer-events: none;
-  transform: translateZ(18px);
-  transform-style: preserve-3d;
+  paint-order: stroke;
+  stroke: rgba(var(--c-bg), 0.35);
+  stroke-width: 3px;
 }
 
-.atlas-pin-3d {
-  position: absolute;
-  display: grid;
-  justify-items: center;
-  gap: 0.15rem;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  pointer-events: auto;
-  transform: translate(-50%, -100%) rotateX(calc(-1 * var(--atlas-pitch, 56deg)));
-  transform-origin: center bottom;
-}
-
-.atlas-pin-stem {
-  width: 2px;
-  height: 1.35rem;
-  background: rgb(var(--c-accent));
-}
-
-.atlas-pin-head {
-  order: -1;
-  width: 1.35rem;
-  height: 1.35rem;
-  display: grid;
-  place-items: center;
-  border-radius: 999px;
-  border: 2px solid rgb(var(--c-accent));
-  background: rgba(var(--c-bg), 0.88);
-  color: rgb(var(--c-accent));
-  font-family: var(--f-mono);
-  font-size: 0.62rem;
-}
-
-.atlas-pin-3d.is-active .atlas-pin-head {
-  background: rgb(var(--c-accent));
-  color: rgb(var(--c-bg));
-  box-shadow: 0 0 18px rgba(var(--c-accent), 0.45);
-}
-
-.atlas-pin-name {
-  order: -2;
-  max-width: 9rem;
-  color: rgb(var(--c-text));
-  font-family: var(--f-serif);
-  font-size: 0.78rem;
-  text-align: center;
-  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.55);
-}
-
-.journey-atlas-civ,
-.journey-atlas-pin {
+.journey-atlas-civ {
   cursor: pointer;
 }
 
@@ -2451,14 +2389,14 @@ button {
   }
 
   .journey-atlas {
-    --atlas-pitch: 42deg;
+    --atlas-pitch: 24deg;
   }
 
   .journey-atlas-tilt {
-    width: 170%;
-    height: 170%;
-    margin: -22% 0 0 -35%;
-    transform: rotateX(var(--atlas-pitch, 42deg)) rotateZ(-10deg);
+    width: 128%;
+    height: 128%;
+    margin: -8% 0 0 -14%;
+    transform: rotateX(var(--atlas-pitch, 24deg)) rotateZ(-5deg);
   }
 
   .map-hud {
