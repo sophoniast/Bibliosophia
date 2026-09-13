@@ -31,16 +31,16 @@ function themeColors(mode, accent) {
   const night = mode === 'night'
   return {
     night,
-    paper: night ? '#32291d' : '#f4e7c8',
-    paperAlt: night ? '#403427' : '#ead8b0',
+    paper: night ? '#3a3124' : '#f4e7c8',
+    paperAlt: night ? '#4a3f2e' : '#ead8b0',
     stain: night ? 'rgba(0, 0, 0, 0.28)' : 'rgba(124, 86, 42, 0.12)',
-    sea: night ? '#4a6870' : '#c3d3d6',
-    seaDeep: night ? '#38545c' : '#b3c6cb',
-    seaEdge: night ? 'rgba(214, 230, 232, 0.32)' : 'rgba(68, 90, 96, 0.24)',
-    coast: night ? 'rgba(230, 214, 180, 0.4)' : 'rgba(90, 68, 40, 0.3)',
+    sea: night ? '#3d6570' : '#8fb4bc',
+    seaDeep: night ? '#2d4f58' : '#7aa3ad',
+    seaEdge: night ? 'rgba(214, 230, 232, 0.4)' : 'rgba(52, 76, 82, 0.32)',
+    coast: night ? 'rgba(230, 214, 180, 0.45)' : 'rgba(86, 64, 38, 0.38)',
     ink: 'rgb(var(--c-text))',
     muted: 'rgba(var(--c-text-muted), 0.62)',
-    hatch: night ? 'rgba(196, 168, 112, 0.48)' : 'rgba(110, 84, 52, 0.34)',
+    hatch: night ? 'rgba(210, 180, 120, 0.62)' : 'rgba(96, 72, 42, 0.5)',
     river: night ? '#8fb6bc' : '#6a8d93',
     routeRemain: 'rgba(var(--c-accent), 0.28)',
     pinFill: night ? '#32291d' : '#f7edd6',
@@ -270,7 +270,7 @@ export default function JourneyAtlas({
         '--atlas-zoom': zoom,
         '--atlas-x': `${pan.x}px`,
         '--atlas-y': `${pan.y}px`,
-        '--atlas-pitch': tilt ? '28deg' : '0deg',
+        '--atlas-pitch': tilt ? '18deg' : '0deg',
         '--atlas-accent': accent,
       }}
     >
@@ -365,7 +365,7 @@ export default function JourneyAtlas({
                       d={land.d}
                       fill="none"
                       stroke={colors.coast}
-                      strokeWidth="1.05"
+                      strokeWidth="1.35"
                       strokeLinejoin="round"
                     />
                   ))}
@@ -501,26 +501,6 @@ export default function JourneyAtlas({
                     <path d="M -17 0 L 0 -3.2 L 17 0 L 0 3.2 Z" fill={colors.ink} opacity="0.4" />
                     <circle r="2.2" fill={colors.ink} />
                     <text y="-24" textAnchor="middle" fill={colors.ink} fontSize="8" fontFamily="var(--f-mono)">N</text>
-                  </g>
-
-                  <g className="parchment-cartouche" transform="translate(56 42)">
-                    <path
-                      d="M -18 -16 H 118 Q 128 -16 128 -6 V 14 Q 128 24 118 24 H -18 Q -28 24 -28 14 V -6 Q -28 -16 -18 -16 Z"
-                      fill={colors.pinFill}
-                      stroke={colors.coast}
-                      strokeWidth="1"
-                    />
-                    <text
-                      x="50"
-                      y="8"
-                      textAnchor="middle"
-                      fill={colors.ink}
-                      fontFamily="var(--f-serif)"
-                      fontSize="15"
-                      letterSpacing="1.4"
-                    >
-                      Bibliosophia
-                    </text>
                   </g>
 
                   {BANNER_LABELS.map((label) => {

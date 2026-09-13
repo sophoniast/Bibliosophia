@@ -1,8 +1,8 @@
 const DEFAULT_BOUNDS = {
-  west: 25.6,
-  east: 50.8,
-  south: 20.8,
-  north: 39.2,
+  west: 20.2,
+  east: 48.6,
+  south: 16.8,
+  north: 38.6,
 }
 
 /** Eastern Mediterranean and Fertile Crescent window used by the parchment atlas. */
