@@ -1384,11 +1384,11 @@ button {
 }
 
 .journey-atlas-tilt {
-  width: 118%;
-  height: 118%;
-  margin: -6% 0 0 -9%;
-  transform: rotateX(var(--atlas-pitch, 32deg)) rotateZ(-6deg);
-  transform-origin: 50% 58%;
+  width: 116%;
+  height: 116%;
+  margin: -5% 0 0 -8%;
+  transform: rotateX(var(--atlas-pitch, 28deg)) rotateZ(-4deg);
+  transform-origin: 50% 62%;
   transform-style: preserve-3d;
   transition: transform 420ms ease;
 }
@@ -1407,17 +1407,13 @@ button {
 .parchment-sheet {
   width: 100%;
   height: 100%;
-  border-radius: 0.35rem;
-  overflow: hidden;
-  box-shadow:
-    0 28px 70px rgba(0, 0, 0, 0.38),
-    0 2px 0 rgba(255, 236, 196, 0.08) inset;
+  border-radius: 0;
+  overflow: visible;
+  filter: drop-shadow(0 28px 48px rgba(0, 0, 0, 0.42));
 }
 
 [data-mode='night'] .parchment-sheet {
-  box-shadow:
-    0 28px 70px rgba(0, 0, 0, 0.55),
-    0 0 0 1px rgba(var(--c-accent), 0.08);
+  filter: drop-shadow(0 28px 56px rgba(0, 0, 0, 0.62));
 }
 
 .journey-atlas-svg {
@@ -1434,8 +1430,9 @@ button {
 .parchment-pin text {
   pointer-events: none;
   paint-order: stroke;
-  stroke: rgba(var(--c-bg), 0.35);
+  stroke: rgb(var(--c-bg));
   stroke-width: 3px;
+  stroke-opacity: 0.35;
 }
 
 .journey-atlas-civ {
