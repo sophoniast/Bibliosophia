@@ -20,21 +20,20 @@ const ESRI_LAYERS = {
   },
 }
 
-// Vector "Map" basemap that follows the app light/dark theme (CARTO Positron / Dark Matter).
-// The label-free variants are used so modern place names don't compete with the
-// biblical-era labels drawn on top; modern names appear only as secondary references.
+// Theme-following vector "Map" basemap. Esri Light/Dark Gray Canvas is used
+// instead of CARTO because the public CARTO CDN now watermarks tiles with
+// "API KEY REQUIRED". The canvas bases are relatively quiet so biblical-era
+// labels remain the primary geography.
 const VECTOR_LAYERS = {
   day: {
-    url: 'https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png',
-    attribution: '&copy; OpenStreetMap contributors, &copy; CARTO',
-    subdomains: 'abcd',
-    maxZoom: 20,
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+    attribution: 'Tiles &copy; Esri',
+    maxZoom: 16,
   },
   night: {
-    url: 'https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png',
-    attribution: '&copy; OpenStreetMap contributors, &copy; CARTO',
-    subdomains: 'abcd',
-    maxZoom: 20,
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+    attribution: 'Tiles &copy; Esri',
+    maxZoom: 16,
   },
 }
 
@@ -172,7 +171,8 @@ export default function JourneyMap({
     }).addTo(map)
     baseLayerRef.current.bringToBack()
 
-    // The CARTO vector basemaps already carry labels; only Esri imagery needs the overlay.
+    // Satellite/terrain imagery needs a place-names overlay; the canvas Map
+    // layer already carries light reference labels.
     if (!isVector && config.labels) {
       labelsLayerRef.current = L.tileLayer(LABELS_URL, {
         maxZoom: config.maxZoom,
