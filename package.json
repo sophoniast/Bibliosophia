@@ -6,9 +6,11 @@
   "scripts": {
     "dev": "node node_modules/vite/bin/vite.js",
     "dev:local": "node scripts/local-dev-server.mjs",
-    "build": "node node_modules/vite/bin/vite.js build",
+    "build": "node node_modules/vite/bin/vite.js build && node scripts/prerender.mjs && node scripts/verify-prerender.mjs",
     "lint": "eslint .",
+    "test": "node --test src/seo/routeMeta.test.js",
     "preview": "node node_modules/vite/bin/vite.js preview",
+    "prerender": "node scripts/prerender.mjs",
     "download:corpus": "node scripts/download-bible-corpus.mjs",
     "sync:supabase": "node scripts/sync-supabase-content.mjs",
     "supabase:start": "supabase start",
