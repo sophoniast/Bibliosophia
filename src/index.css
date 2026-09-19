@@ -1501,24 +1501,30 @@ button {
 
 .atlas-slab-flat {
   position: relative;
-  display: grid;
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 .atlas-slab-flat > .journey-atlas-svg-base,
 .atlas-slab-flat > .journey-atlas-svg-overlay,
 .atlas-slab-flat > .atlas-relief-canvas,
 .atlas-slab-flat > .atlas-pin-layer {
-  grid-area: 1 / 1;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
 }
 
 .atlas-relief-canvas {
-  width: 100%;
-  height: 100%;
   z-index: 2;
   pointer-events: none;
   opacity: 0;
   transition: opacity 520ms ease;
   mix-blend-mode: soft-light;
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
 }
 
 .journey-atlas[data-relief='on'] .atlas-relief-canvas {
@@ -1528,24 +1534,24 @@ button {
 
 .journey-atlas-svg {
   display: block;
-  width: 100%;
-  height: 100%;
   overflow: hidden;
 }
 
 .journey-atlas-svg-base {
-  position: relative;
   z-index: 1;
 }
 
 .journey-atlas-svg-overlay {
-  position: relative;
   z-index: 3;
   pointer-events: none;
 }
 
 .journey-atlas-svg-overlay .journey-atlas-civ {
   pointer-events: auto;
+}
+
+.atlas-pin-layer {
+  z-index: 4;
 }
 
 .atlas-water-shimmer {

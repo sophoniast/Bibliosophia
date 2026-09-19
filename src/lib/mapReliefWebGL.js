@@ -39,11 +39,11 @@ void main() {
   vec3 normal = normalize(vec3(-hx * 14.0 * u_intensity, -hy * 14.0 * u_intensity, 1.0));
   float ndl = clamp(dot(normal, normalize(u_lightDir)), 0.0, 1.0);
   float rim = pow(1.0 - abs(normal.z), 1.6) * 0.35 * u_intensity;
-  float shade = mix(0.42, 1.08, ndl) + rim;
-  float micro = sin((v_uv.x + v_uv.y) * 180.0 + u_time * 0.4) * 0.015 * u_intensity;
+    float shade = mix(0.38, 1.18, ndl) + rim;
+  float micro = sin((v_uv.x + v_uv.y) * 180.0 + u_time * 0.4) * 0.02 * u_intensity;
   vec3 base = mix(u_landLo, u_landHi, clamp(h * 1.15 + micro, 0.0, 1.0));
   vec3 lit = base * shade;
-  float alpha = smoothstep(0.02, 0.12, h) * (0.55 + 0.45 * u_intensity);
+  float alpha = smoothstep(0.02, 0.1, h) * (0.72 + 0.28 * u_intensity);
   outColor = vec4(lit, alpha);
 }`
 
@@ -116,20 +116,20 @@ function buildHeightmap(width, height, landPaths, mountainPaths) {
   ctx.lineJoin = 'round'
   for (const ridge of mountainPaths) {
     ctx.strokeStyle = 'rgb(255, 255, 255)'
-    ctx.lineWidth = 7
-    ctx.globalAlpha = 0.85
+    ctx.lineWidth = 9
+    ctx.globalAlpha = 0.95
     ctx.stroke(new Path2D(ridge))
-    ctx.strokeStyle = 'rgb(210, 210, 210)'
-    ctx.lineWidth = 16
-    ctx.globalAlpha = 0.35
+    ctx.strokeStyle = 'rgb(220, 220, 220)'
+    ctx.lineWidth = 22
+    ctx.globalAlpha = 0.45
     ctx.stroke(new Path2D(ridge))
   }
   ctx.globalAlpha = 1
 
   // Inland plateaus via blurred white fill inset
   ctx.globalCompositeOperation = 'lighter'
-  ctx.filter = 'blur(10px)'
-  ctx.fillStyle = 'rgba(255,255,255,0.28)'
+  ctx.filter = 'blur(12px)'
+  ctx.fillStyle = 'rgba(255,255,255,0.38)'
   for (const d of landPaths) {
     ctx.fill(new Path2D(d))
   }
@@ -142,7 +142,7 @@ function buildHeightmap(width, height, landPaths, mountainPaths) {
   blur.width = width
   blur.height = height
   const bctx = blur.getContext('2d')
-  bctx.filter = 'blur(2.2px)'
+  bctx.filter = 'blur(1.6px)'
   bctx.drawImage(canvas, 0, 0)
   return bctx.getImageData(0, 0, width, height)
 }
@@ -209,11 +209,12 @@ export function createReliefRenderer(canvas, { landPaths = [], mountainPaths = [
 
   const draw = (now) => {
     if (!running) return
-    const cssW = canvas.clientWidth || canvas.width
-    const cssH = canvas.clientHeight || canvas.height
+    const parent = canvas.parentElement
+    const cssW = parent?.clientWidth || canvas.clientWidth || 1
+    const cssH = parent?.clientHeight || canvas.clientHeight || 1
     const dpr = Math.min(window.devicePixelRatio || 1, 2)
-    const w = Math.max(1, Math.floor(cssW * dpr))
-    const h = Math.max(1, Math.floor(cssH * dpr))
+    const w = Math.max(1, Math.min(2048, Math.floor(cssW * dpr)))
+    const h = Math.max(1, Math.min(2048, Math.floor(cssH * dpr)))
     if (canvas.width !== w || canvas.height !== h) {
       canvas.width = w
       canvas.height = h

@@ -461,12 +461,12 @@ export default function JourneyAtlas({
                 <path
                   d={routeD}
                   fill="none"
-                  stroke={muted}
+                  stroke={accent}
                   strokeWidth="3.2"
                   strokeLinecap="round"
                   strokeLinejoin="round"
                   strokeDasharray="7 9"
-                  opacity="0.7"
+                  opacity="0.55"
                 />
               ) : null}
               {routeD ? (
