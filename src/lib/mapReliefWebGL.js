@@ -209,12 +209,14 @@ export function createReliefRenderer(canvas, { landPaths = [], mountainPaths = [
 
   const draw = (now) => {
     if (!running) return
-    const parent = canvas.parentElement
-    const cssW = parent?.clientWidth || canvas.clientWidth || 1
-    const cssH = parent?.clientHeight || canvas.clientHeight || 1
+    const stage = canvas.closest('.journey-atlas-stage') || canvas.parentElement
+    const cssW = Math.max(1, stage?.clientWidth || 1)
+    const cssH = Math.max(1, stage?.clientHeight || 1)
     const dpr = Math.min(window.devicePixelRatio || 1, 2)
     const w = Math.max(1, Math.min(2048, Math.floor(cssW * dpr)))
     const h = Math.max(1, Math.min(2048, Math.floor(cssH * dpr)))
+    canvas.style.width = '100%'
+    canvas.style.height = '100%'
     if (canvas.width !== w || canvas.height !== h) {
       canvas.width = w
       canvas.height = h

@@ -199,14 +199,14 @@ function MapReaderPage() {
     resetView()
   }
 
-  const checkpointTitle = !activeJourney
+  const checkpointTitle = !activeJourney || !mapEngaged
     ? 'Select a journey'
     : enRoute && nextPoint && nextPoint !== currentPoint
       ? `En route to ${nextPoint.name}`
       : currentPoint?.name || 'Select a journey'
 
-  const checkpointCopy = !activeJourney
-    ? 'Choose a biblical route from the rail to raise the terrain and begin.'
+  const checkpointCopy = !activeJourney || !mapEngaged
+    ? 'Choose a waypoint or press play to raise the terrain and begin.'
     : enRoute && currentPoint
       ? `Mid-journey near ${currentPoint.name}.`
       : currentPoint?.history || ''
