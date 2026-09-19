@@ -6,10 +6,13 @@ import { escapeHtml, getIndexableRoutes } from '../src/seo/routeMeta.js'
 
 const distDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist')
 
-function htmlPathFor(routePath) {
-  return routePath === '/'
-    ? path.join(distDir, 'index.html')
-    : path.join(distDir, routePath.replace(/^\//, ''), 'index.html')
+function htmlPathsFor(routePath) {
+  if (routePath === '/') return [path.join(distDir, 'index.html')]
+  const slug = routePath.replace(/^\//, '')
+  return [
+    path.join(distDir, slug, 'index.html'),
+    path.join(distDir, `${slug}.html`),
+  ]
 }
 
 async function main() {
@@ -18,8 +21,12 @@ async function main() {
   const descriptions = new Set()
 
   for (const route of routes) {
-    const file = htmlPathFor(route.path)
-    const html = await fs.readFile(file, 'utf8')
+    const files = htmlPathsFor(route.path)
+    const html = await fs.readFile(files[0], 'utf8')
+    for (const file of files.slice(1)) {
+      const sibling = await fs.readFile(file, 'utf8')
+      assert.equal(sibling, html, `${file} must match the directory prerender`)
+    }
 
     assert.match(html, new RegExp(`<title>${escapeRegExp(escapeHtml(route.title))}</title>`))
     assert.match(html, new RegExp(`name="description" content="${escapeRegExp(escapeHtml(route.description))}"`))

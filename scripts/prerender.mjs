@@ -40,6 +40,13 @@ async function writeRouteHtml(template, route) {
 
   await fs.mkdir(outputDir, { recursive: true })
   await fs.writeFile(path.join(outputDir, 'index.html'), html)
+
+  // Flat sibling so hosts that map /reader → /reader.html (Vite preview, Vercel
+  // cleanUrls) do not fall back to the Hub shell.
+  if (route.path !== '/') {
+    await fs.writeFile(path.join(distDir, `${route.path.replace(/^\//, '')}.html`), html)
+  }
+
   return outputDir
 }
 
