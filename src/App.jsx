@@ -3,6 +3,8 @@ import { BookOpenText, Compass, Home, Menu, PenLine, X } from 'lucide-react'
 import { BrowserRouter, NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { ThemeProvider } from './context/ThemeContext'
 import { AuthProvider } from './context/AuthContext'
+import DocumentMeta from './components/DocumentMeta'
+import SeoLanding from './components/SeoLanding'
 import ThemeDock from './components/ThemeDock'
 
 const HomePage = lazy(() => import('./pages/HomePage'))
@@ -51,6 +53,16 @@ function AppMenu() {
         ))}
       </nav>
     </div>
+  )
+}
+
+function RouteSeo() {
+  const location = useLocation()
+  return (
+    <>
+      <DocumentMeta pathname={location.pathname} />
+      <SeoLanding pathname={location.pathname} />
+    </>
   )
 }
 
@@ -114,6 +126,7 @@ function App() {
       <ThemeProvider>
         <BrowserRouter>
           <AmbientBackdrop />
+          <RouteSeo />
           <AppMenu />
           <ThemeDock />
           <RouteErrorBoundary>

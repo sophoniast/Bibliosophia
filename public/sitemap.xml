@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://bibliosophia.vercel.app/</loc>
+  </url>
+  <url>
+    <loc>https://bibliosophia.vercel.app/reader</loc>
+  </url>
+  <url>
+    <loc>https://bibliosophia.vercel.app/map</loc>
+  </url>
+  <url>
+    <loc>https://bibliosophia.vercel.app/scribe</loc>
+  </url>
+</urlset>
