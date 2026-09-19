@@ -435,6 +435,103 @@ button {
   background: rgba(var(--c-accent), 0.2);
 }
 
+.seo-prerender,
+.seo-landing {
+  color: rgb(var(--c-text));
+}
+
+.seo-prerender {
+  max-width: 46rem;
+  margin: 0 auto;
+  padding: 4.5rem 1.5rem 3rem;
+}
+
+.seo-prerender h1,
+.seo-landing-details strong {
+  display: block;
+  margin: 0.35rem 0 0.85rem;
+  font-family: var(--f-display);
+  font-size: clamp(1.6rem, 4vw, 2.4rem);
+  line-height: 1.2;
+}
+
+.seo-prerender p,
+.seo-landing-body p,
+.seo-faq-item p {
+  margin: 0 0 0.85rem;
+  line-height: 1.65;
+  color: rgb(var(--c-text-muted));
+}
+
+.seo-eyebrow {
+  margin: 0 0 0.4rem;
+  color: rgb(var(--c-accent));
+  font-family: var(--f-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.seo-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin: 1.1rem 0 1.5rem;
+}
+
+.seo-links a {
+  border: 1px solid rgba(var(--c-accent), 0.32);
+  border-radius: 999px;
+  padding: 0.55rem 0.9rem;
+  background: rgba(var(--c-accent), 0.12);
+}
+
+.seo-faq h2 {
+  margin: 0 0 0.85rem;
+  font-family: var(--f-serif);
+  font-size: 1.15rem;
+}
+
+.seo-faq-item h3 {
+  margin: 0 0 0.35rem;
+  font-size: 1rem;
+}
+
+.seo-landing {
+  position: fixed;
+  left: 1rem;
+  bottom: 1rem;
+  z-index: 70;
+  width: min(28rem, calc(100vw - 2rem));
+  pointer-events: none;
+}
+
+.seo-landing-details {
+  pointer-events: auto;
+  max-height: min(70vh, 34rem);
+  overflow: auto;
+  border-radius: 1rem;
+  padding: 0.85rem 1rem;
+}
+
+.seo-landing-details summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.seo-landing-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.seo-landing-details summary strong {
+  font-size: 1rem;
+  margin-bottom: 0;
+}
+
+.seo-landing-body {
+  margin-top: 0.9rem;
+}
+
 .auth-dialog-backdrop {
   position: fixed;
   inset: 0;
@@ -2528,5 +2625,13 @@ button {
   .manuscript-lines p {
     padding-left: 2rem;
     font-size: 1.02rem;
+  }
+
+  .seo-landing {
+    top: 0.85rem;
+    right: 0.85rem;
+    bottom: auto;
+    left: auto;
+    max-width: min(22rem, calc(100vw - 1.7rem));
   }
 }
