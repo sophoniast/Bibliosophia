@@ -174,6 +174,7 @@ function MapReaderPage() {
             {activeJourney ? (
               <JourneyMap
                 activeWaypointIndex={selectedWaypoint}
+                follow={isPlaying}
                 journey={activeJourney}
                 mode={mode}
                 onReady={(controls) => { mapControlsRef.current = controls }}

@@ -8,7 +8,7 @@ export const WORLD = {
   halfZ: 19,
   water: 0.42,
   bottom: -5.6,
-  grid: 72,
+  grid: 96,
   bounds: ATLAS_BOUNDS,
 }
 
@@ -121,8 +121,8 @@ function ridgeLift(x, z) {
   let lift = 0
   for (const ridge of RIDGES) {
     const distance = distToPolyline(x, z, ridge.line)
-    const reach = ridge.id === 'sinai' || ridge.id === 'lebanon' ? 2.4 : 3.6
-    const peak = ridge.id === 'zagros' || ridge.id === 'taurus' ? 6.4 : 5.2
+    const reach = ridge.id === 'sinai' || ridge.id === 'lebanon' ? 1.8 : 2.6
+    const peak = ridge.id === 'zagros' || ridge.id === 'taurus' ? 2.35 : 1.85
     lift = Math.max(lift, peak * Math.exp(-(distance * distance) / (reach * reach)))
   }
   return lift
@@ -148,16 +148,16 @@ export function sampleCell(x, z) {
   let biome = BIOME.water
 
   if (!wet) {
-    height = 0.72 + noise
-    if (land?.tone === 'highland') height += 1.55
-    if (land?.tone === 'desert') height += 0.55
-    if (land?.tone === 'africa') height += 0.35
-    if (land?.id === 'fertile-crescent') height += 0.18
+    height = 0.62 + noise * 0.55
+    if (land?.tone === 'highland') height += 0.55
+    if (land?.tone === 'desert') height += 0.22
+    if (land?.tone === 'africa') height += 0.16
+    if (land?.id === 'fertile-crescent') height += 0.1
     height += mountains
     if (river < 0.72) {
       height = Math.min(height, WORLD.water - 0.08 + river * 0.55)
       biome = BIOME.wetland
-    } else if (mountains > 3.2) {
+    } else if (mountains > 1.15) {
       biome = BIOME.alpine
     } else if (land?.tone === 'desert') {
       biome = BIOME.desert

@@ -7,6 +7,7 @@ export default function JourneyMap({
   progress = 0,
   palette,
   mode = 'night',
+  follow = false,
   activeWaypointIndex = 0,
   onSelectWaypoint,
   onReady,
@@ -54,11 +55,11 @@ export default function JourneyMap({
     if (!engine) return
     engine.setJourney(journey, path)
     engine.fitRoute()
-  }, [journey, path])
+  }, [journey?.id, path])
 
   useEffect(() => {
-    engineRef.current?.setProgress(progress)
-  }, [progress])
+    engineRef.current?.setProgress(progress, { follow })
+  }, [progress, follow])
 
   useEffect(() => {
     engineRef.current?.setActiveWaypoint(activeWaypointIndex)
