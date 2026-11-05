@@ -1778,6 +1778,23 @@ button {
   gap: 0.4rem;
 }
 
+.map-period-chip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.7rem;
+  margin: 0.55rem 0 0;
+  color: rgb(var(--c-text));
+  font-family: var(--f-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  opacity: 0.82;
+}
+
+.map-period-chip span {
+  color: rgb(var(--c-accent));
+}
+
 .journey-switcher {
   display: none;
 }
