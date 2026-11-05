@@ -5,16 +5,21 @@ import { REGION_LABELS, SEA_LABELS } from './mapAtlasFeatures'
 import {
   BIOME,
   WORLD,
-  hashUnit,
-  latLonToWorld,
-  sampleCell,
+  createGeoWorld,
 } from './geoWorld'
+import { boundsForJourney, getPeriodForJourney } from '../data/historicalPeriods'
 import { createTerrainPalette, pickSwatch } from './themeTerrain'
-import { computePathDistances, getPointAlongPath, getTraveledPath } from './mapGeometry'
+import { computePathDistances } from './mapGeometry'
 import { getModernName } from '../data/historicalGeography'
 
-const HOME = new THREE.Vector3(48, 42, 54)
-const SUN = new THREE.Vector3(-28, 48, 22)
+const HOME = new THREE.Vector3(34, 40, 38)
+const SUN = new THREE.Vector3(-24, 46, 20)
+const EXTRA_LABELS = [
+  { name: 'Cyprus', lat: 35.12, lon: 33.28 },
+  { name: 'Crete', lat: 35.3, lon: 24.9 },
+  { name: 'Haran', lat: 36.86, lon: 39.01 },
+  { name: 'Jordan', lat: 32.05, lon: 35.55 },
+]
 const REDUCE_MOTION = typeof window !== 'undefined'
   && window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
@@ -88,7 +93,7 @@ function biomeColor(biome, height, unit, colors) {
   if (biome === BIOME.desert) return pickSwatch(colors.sand, unit).clone()
   if (biome === BIOME.alpine) {
     const color = pickSwatch(colors.alpine, unit).clone()
-    if (height > 5.4) color.lerp(colors.stone, Math.min(0.72, (height - 5.4) * 0.16))
+    if (height > 1.8) color.lerp(colors.stone, Math.min(0.55, (height - 1.8) * 0.28))
     return color
   }
   if (biome === BIOME.wetland) return pickSwatch(colors.wetland, unit).clone()
@@ -100,7 +105,7 @@ function biomeColor(biome, height, unit, colors) {
 
 export function createDiorama(container, { onSelectWaypoint } = {}) {
   const scene = new THREE.Scene()
-  const camera = new THREE.OrthographicCamera(-50, 50, 34, -34, 0.1, 400)
+  const camera = new THREE.OrthographicCamera(-48, 48, 32, -32, 0.1, 400)
   camera.position.copy(HOME)
 
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false })
@@ -139,9 +144,17 @@ export function createDiorama(container, { onSelectWaypoint } = {}) {
   const sun = new THREE.DirectionalLight(0xffedcf, 2.8)
   sun.position.copy(SUN)
   sun.castShadow = true
-  Object.assign(sun.shadow.camera, { left: -48, right: 48, top: 32, bottom: -32, near: 1, far: 140 })
+  Object.assign(sun.shadow.camera, { left: -40, right: 40, top: 40, bottom: -40, near: 1, far: 160 })
   sun.shadow.mapSize.set(1024, 1024)
   scene.add(sun)
+
+  const groundShadow = new THREE.Mesh(
+    new THREE.CircleGeometry(WORLD.sizeX * 0.58, 48),
+    new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.22, depthWrite: false }),
+  )
+  groundShadow.rotation.x = -Math.PI / 2
+  groundShadow.position.y = WORLD.bottom - 1.6
+  scene.add(groundShadow)
 
   const slabGroup = new THREE.Group()
   scene.add(slabGroup)
@@ -186,13 +199,13 @@ export function createDiorama(container, { onSelectWaypoint } = {}) {
   slabGroup.add(base)
 
   const waterMesh = new THREE.Mesh(
-    new THREE.PlaneGeometry(sizeX, sizeZ, 48, 28).rotateX(-Math.PI / 2),
+    new THREE.PlaneGeometry(sizeX, sizeZ, 56, 56).rotateX(-Math.PI / 2),
     new THREE.MeshStandardMaterial({
       color: 0x71bfc1,
-      roughness: 0.18,
-      metalness: 0.05,
+      roughness: 0.16,
+      metalness: 0.04,
       transparent: true,
-      opacity: 0.9,
+      opacity: 0.88,
     }),
   )
   waterMesh.position.y = water
@@ -223,37 +236,68 @@ export function createDiorama(container, { onSelectWaypoint } = {}) {
     mesh.count += 1
   }
 
-  const trunks = batch(new THREE.CylinderGeometry(0.12, 0.17, 1, 5), 0x7a6548, 420)
+  const trunks = batch(new THREE.CylinderGeometry(0.11, 0.16, 1, 5), 0x7a6548, 900)
   const pines = [
-    batch(new THREE.ConeGeometry(0.85, 1, 6), 0x3f7350, 280),
-    batch(new THREE.ConeGeometry(0.85, 1, 6), 0x518456, 280),
-    batch(new THREE.ConeGeometry(0.85, 1, 6), 0x64905c, 280),
+    batch(new THREE.ConeGeometry(0.82, 1, 6), 0x3f7350, 520),
+    batch(new THREE.ConeGeometry(0.82, 1, 6), 0x518456, 520),
+    batch(new THREE.ConeGeometry(0.82, 1, 6), 0x64905c, 520),
   ]
-  const canopy = batch(new THREE.IcosahedronGeometry(1, 1), 0x78a35a, 360)
-  const rocks = batch(new THREE.IcosahedronGeometry(1, 0), 0xa5ad99, 260)
-  const desertPlants = batch(new THREE.CylinderGeometry(0.09, 0.14, 1, 5), 0x71894f, 180)
+  const canopy = batch(new THREE.IcosahedronGeometry(1, 1), 0x78a35a, 720)
+  const rocks = batch(new THREE.IcosahedronGeometry(1, 0), 0xa5ad99, 360)
+  const desertPlants = batch(new THREE.CylinderGeometry(0.09, 0.14, 1, 5), 0x71894f, 280)
+  const tufts = batch(new THREE.ConeGeometry(0.16, 0.32, 4), 0x6a944c, 1600)
+
+  let geo = createGeoWorld(
+    getPeriodForJourney('abram').bounds,
+    getPeriodForJourney('abram').climate,
+  )
+  geo.buildField()
+  let worldKey = getPeriodForJourney('abram').id
 
   const clouds = []
-  const cloudMaterial = material(0xf8f6ed, { roughness: 1, side: THREE.DoubleSide, transparent: true, opacity: 0.88 })
-  for (let i = 0; i < 5; i += 1) {
+  const cloudMaterial = material(0xf8f6ed, { roughness: 1, side: THREE.DoubleSide, transparent: true, opacity: 0.9 })
+  for (let i = 0; i < 8; i += 1) {
     const group = new THREE.Group()
-    const puffs = 3 + (i % 2)
+    const puffs = 4 + (i % 3)
     for (let p = 0; p < puffs; p += 1) {
       const puff = new THREE.Mesh(new THREE.IcosahedronGeometry(1, 0), cloudMaterial)
-      puff.position.set((p - puffs / 2) * 1.1, (p % 2) * 0.28, ((p * 1.4) % 2.4) - 0.8)
-      puff.scale.setScalar(0.55 + (p % 3) * 0.18)
+      puff.position.set((p - puffs / 2) * 1.05, (p % 2) * 0.32, ((p * 1.35) % 2.6) - 0.9)
+      puff.scale.set(1.05 + (p % 3) * 0.28, 0.42 + (p % 2) * 0.12, 0.78 + (p % 3) * 0.2)
       group.add(puff)
     }
-    group.position.set(-halfX + 10 + i * 13, 17.8 + (i % 3) * 1.1, -halfZ + 8 + (i * 9) % 22)
-    group.userData.speed = 0.28 + (i % 4) * 0.1
+    group.userData.speed = 0.22 + (i % 5) * 0.08
     slabGroup.add(group)
     clouds.push(group)
   }
 
+  function scatterClouds() {
+    const seed = geo.climate.seed || 1
+    clouds.forEach((cloud, i) => {
+      const t = ((seed * 17 + i * 13) % 97) / 97
+      cloud.position.set(
+        -halfX + 6 + ((t * 71) % (sizeX - 8)),
+        14.5 + (i % 4) * 1.35,
+        -halfZ + 5 + (((t * 53) + i * 9) % (sizeZ - 10)),
+      )
+      cloud.scale.setScalar(0.85 + (i % 3) * 0.18)
+    })
+  }
+  scatterClouds()
+
   const routeGroup = new THREE.Group()
   slabGroup.add(routeGroup)
   let routePending = null
-  let routeTraveled = null
+  const crumbMaterial = new THREE.MeshStandardMaterial({
+    color: 0xc9a84c,
+    emissive: 0xc9a84c,
+    emissiveIntensity: 0.45,
+    roughness: 0.38,
+  })
+  const crumbs = new THREE.InstancedMesh(new THREE.SphereGeometry(0.16, 8, 8), crumbMaterial, 360)
+  crumbs.count = 0
+  crumbs.frustumCulled = false
+  crumbs.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
+  routeGroup.add(crumbs)
 
   function disposeRoute(mesh) {
     if (!mesh) return
@@ -264,35 +308,49 @@ export function createDiorama(container, { onSelectWaypoint } = {}) {
 
   function makeTube(points, radius, color, extra = {}) {
     if (!points || points.length < 2) return null
-    const curve = new THREE.CatmullRomCurve3(points)
-    const mesh = new THREE.Mesh(
-      new THREE.TubeGeometry(curve, Math.max(24, points.length * 8), radius, 6, false),
-      new THREE.MeshStandardMaterial({
-        color,
-        emissive: extra.emissive || color,
-        emissiveIntensity: extra.emissiveIntensity || 0.12,
-        roughness: 0.42,
-        metalness: 0.08,
-      }),
-    )
-    mesh.castShadow = true
-    mesh.frustumCulled = false
-    routeGroup.add(mesh)
-    return mesh
+    try {
+      const curve = new THREE.CatmullRomCurve3(points)
+      const mesh = new THREE.Mesh(
+        new THREE.TubeGeometry(curve, Math.max(24, Math.min(160, points.length * 4)), radius, 5, false),
+        new THREE.MeshStandardMaterial({
+          color,
+          emissive: extra.emissive || color,
+          emissiveIntensity: extra.emissiveIntensity || 0.08,
+          roughness: 0.42,
+          metalness: 0.08,
+          transparent: true,
+          opacity: extra.opacity ?? 1,
+        }),
+      )
+      mesh.castShadow = true
+      mesh.frustumCulled = false
+      routeGroup.add(mesh)
+      return mesh
+    } catch {
+      return null
+    }
   }
 
   const traveler = new THREE.Group()
-  const travelerGlow = new THREE.Mesh(
-    new THREE.SphereGeometry(0.58, 16, 16),
-    new THREE.MeshStandardMaterial({ color: 0xc9a84c, emissive: 0xc9a84c, emissiveIntensity: 0.8, roughness: 0.35 }),
+  const travelerMast = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.07, 0.07, 1.6, 8),
+    new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xc9a84c, emissiveIntensity: 0.35, roughness: 0.4 }),
   )
+  travelerMast.position.y = 0.9
+  traveler.add(travelerMast)
+  const travelerGlow = new THREE.Mesh(
+    new THREE.SphereGeometry(0.42, 16, 16),
+    new THREE.MeshStandardMaterial({ color: 0xc9a84c, emissive: 0xc9a84c, emissiveIntensity: 0.9, roughness: 0.32 }),
+  )
+  travelerGlow.position.y = 1.55
   travelerGlow.castShadow = true
   traveler.add(travelerGlow)
   const travelerRing = new THREE.Mesh(
-    new THREE.TorusGeometry(0.86, 0.06, 8, 24),
-    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.78 }),
+    new THREE.TorusGeometry(0.7, 0.05, 8, 24),
+    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8 }),
   )
   travelerRing.rotation.x = Math.PI / 2
+  travelerRing.position.y = 0.12
   traveler.add(travelerRing)
   slabGroup.add(traveler)
 
@@ -301,27 +359,41 @@ export function createDiorama(container, { onSelectWaypoint } = {}) {
   const waypointMarkers = []
   const staticLabels = []
 
-  REGION_LABELS.forEach((entry) => {
-    const [x, z] = latLonToWorld(entry.lat, entry.lon)
-    const sample = sampleCell(x, z)
+  function clearStaticLabels() {
+    staticLabels.forEach((label) => {
+      labelRoot.remove(label)
+    })
+    staticLabels.length = 0
+  }
+
+  function addStaticLabel(entry, kind) {
+    if (!geo.containsLatLon(entry.lat, entry.lon)) return
+    const [x, z] = geo.latLonToWorld(entry.lat, entry.lon)
+    const sample = geo.sampleCell(x, z)
     const node = document.createElement('div')
-    node.className = 'hist-label region'
+    node.className = `hist-label ${kind}`
     node.innerHTML = `<span class="hist">${entry.name}</span>`
     const object = new CSS2DObject(node)
-    object.position.set(x, sample.height + 0.9, z)
+    object.position.set(x, (kind === 'water' ? water : sample.height) + 0.55, z)
+    object.userData.kind = kind
     labelRoot.add(object)
     staticLabels.push(object)
-  })
-  SEA_LABELS.forEach((entry) => {
-    const [x, z] = latLonToWorld(entry.lat, entry.lon)
-    const node = document.createElement('div')
-    node.className = 'hist-label water'
-    node.innerHTML = `<span class="hist">${entry.name}</span>`
-    const object = new CSS2DObject(node)
-    object.position.set(x, water + 0.6, z)
-    labelRoot.add(object)
-    staticLabels.push(object)
-  })
+  }
+
+  function rebuildLabels(period) {
+    clearStaticLabels()
+    const allowed = new Set(period?.labels || [])
+    const regions = [...REGION_LABELS, ...EXTRA_LABELS]
+    regions.forEach((entry) => {
+      if (allowed.size && !allowed.has(entry.name)) return
+      addStaticLabel(entry, 'region')
+    })
+    SEA_LABELS.forEach((entry) => {
+      if (allowed.size && !allowed.has(entry.name)) return
+      addStaticLabel(entry, 'water')
+    })
+  }
+  rebuildLabels(getPeriodForJourney('abram'))
 
   let colors = createTerrainPalette({ bg: '#111315', text: '#D0D3D4', accent: '#F1C40F' }, 'night')
   let currentPath = []
@@ -331,17 +403,19 @@ export function createDiorama(container, { onSelectWaypoint } = {}) {
   let disposed = false
   let terrainReady = false
   let intro = REDUCE_MOTION ? 1 : 0
-  let lastTubeAt = 0
-  slabGroup.scale.set(0.94, 0.74, 0.94)
+  let followMotion = false
+  let sampledRoute = []
+  const followOffset = HOME.clone()
+  slabGroup.scale.setScalar(REDUCE_MOTION ? 1 : 0.97)
 
   function shade(color, x, z, height) {
     const light = SUN.clone().normalize()
     const epsilon = 0.4
-    const slopeX = (sampleCell(x + epsilon, z).height - sampleCell(x - epsilon, z).height) / (2 * epsilon)
-    const slopeZ = (sampleCell(x, z + epsilon).height - sampleCell(x, z - epsilon).height) / (2 * epsilon)
+    const slopeX = (geo.sampleCell(x + epsilon, z).height - geo.sampleCell(x - epsilon, z).height) / (2 * epsilon)
+    const slopeZ = (geo.sampleCell(x, z + epsilon).height - geo.sampleCell(x, z - epsilon).height) / (2 * epsilon)
     const normal = new THREE.Vector3(-slopeX, 1, -slopeZ).normalize()
     const lit = 0.74 + Math.max(0, normal.dot(light)) * 0.26
-    const variation = 0.96 + hashUnit(x, z, 4) * 0.08
+    const variation = 0.96 + geo.hashUnit(x, z, 4) * 0.08
     return color.clone().multiplyScalar(lit * variation)
   }
 
@@ -350,8 +424,8 @@ export function createDiorama(container, { onSelectWaypoint } = {}) {
     const writeTri = (ax, az, bx, bz, cx, cz) => {
       const points = [[ax, az], [bx, bz], [cx, cz]]
       for (const [x, z] of points) {
-        const sample = sampleCell(x, z)
-        const unit = hashUnit(x, z, 5)
+        const sample = geo.sampleCell(x, z)
+        const unit = geo.hashUnit(x, z, 5)
         const color = shade(biomeColor(sample.biome, sample.height, unit, colors), x, z, sample.height)
         groundPositions[pointer * 3] = x
         groundPositions[pointer * 3 + 1] = sample.height
@@ -383,12 +457,12 @@ export function createDiorama(container, { onSelectWaypoint } = {}) {
 
     let sidePointer = 0
     const writeSide = (x1, z1, x2, z2) => {
-      const h1 = sampleCell(x1, z1).height
-      const h2 = sampleCell(x2, z2).height
+      const h1 = geo.sampleCell(x1, z1).height
+      const h2 = geo.sampleCell(x2, z2).height
       const layers = [
         [h1, h2],
-        [-1.4, -1.4],
-        [-3.6, -3.6],
+        [-1.2, -1.2],
+        [-3.8, -3.8],
         [bottom, bottom],
       ]
       for (let layer = 0; layer < 3; layer += 1) {
@@ -430,26 +504,37 @@ export function createDiorama(container, { onSelectWaypoint } = {}) {
     sideGeometry.attributes.color.needsUpdate = true
 
     instances.forEach((mesh) => { mesh.count = 0 })
-    for (let z = 2; z < grid - 2; z += 2) {
-      for (let x = 2; x < grid - 2; x += 2) {
+    const vegetation = geo.climate.vegetation ?? 0.5
+    const forest = geo.climate.forest ?? 0.35
+    const stride = vegetation > 0.72 ? 1 : 2
+    for (let z = 2; z < grid - 2; z += stride) {
+      for (let x = 2; x < grid - 2; x += stride) {
         const wx = -halfX + (x + 0.5) * stepX
         const wz = -halfZ + (z + 0.5) * stepZ
-        const sample = sampleCell(wx, wz)
-        if (sample.wet || sample.height < water + 0.5 || sample.biome === BIOME.shore || sample.biome === BIOME.wetland) continue
-        const unit = hashUnit(wx, wz, 9)
-        if (sample.biome === BIOME.grass && unit > 0.62) {
-          const tall = 1.1 + unit * 1.4
-          place(trunks, wx, sample.height + tall * 0.35, wz, 0.7, tall, 0.7, unit * 6)
-          place(canopy, wx, sample.height + tall * 0.95, wz, 0.85 + unit * 0.5, 0.7, 0.85 + unit * 0.4, unit * 4)
-        } else if (sample.biome === BIOME.alpine && unit > 0.55 && sample.height > 2.4) {
+        const sample = geo.sampleCell(wx, wz)
+        if (sample.wet || sample.height < water + 0.42 || sample.biome === BIOME.shore || sample.biome === BIOME.wetland) continue
+        const unit = geo.hashUnit(wx, wz, 9)
+        const jitter = (geo.hashUnit(wx, wz, 2) - 0.5) * stepX * 0.45
+        const jx = wx + jitter
+        const jz = wz + (geo.hashUnit(wx, wz, 3) - 0.5) * stepZ * 0.45
+        if (sample.biome === BIOME.grass) {
+          if (unit < 0.55 + vegetation * 0.35) {
+            place(tufts, jx, sample.height + 0.12, jz, 0.7 + unit * 0.5, 0.45 + unit * 0.4, 0.7 + unit * 0.4, unit * 8)
+          }
+          if (unit > 0.52 - forest * 0.28) {
+            const tall = 1.05 + unit * 1.55
+            place(trunks, jx, sample.height + tall * 0.35, jz, 0.62, tall, 0.62, unit * 6)
+            place(canopy, jx, sample.height + tall * 0.95, jz, 0.8 + unit * 0.55, 0.68, 0.8 + unit * 0.4, unit * 4)
+          }
+        } else if (sample.biome === BIOME.alpine && unit > 0.42 && sample.height > 1.15) {
           const pine = pines[Math.floor(unit * pines.length) % pines.length]
-          const tall = 1.4 + unit * 1.8
-          place(trunks, wx, sample.height + 0.45, wz, 0.55, 0.9, 0.55, unit * 5)
-          place(pine, wx, sample.height + tall * 0.7, wz, 0.7 + unit * 0.3, tall, 0.7 + unit * 0.3, unit * 3)
-        } else if (sample.biome === BIOME.desert && unit > 0.91) {
-          place(desertPlants, wx, sample.height + 0.35, wz, 0.7, 0.55 + unit * 0.4, 0.7, unit * 8)
-        } else if (sample.biome === BIOME.alpine && unit < 0.18) {
-          place(rocks, wx, sample.height + 0.18, wz, 0.35 + unit, 0.28 + unit * 0.4, 0.35 + unit, unit * 5)
+          const tall = 1.35 + unit * 1.9
+          place(trunks, jx, sample.height + 0.45, jz, 0.5, 0.9, 0.5, unit * 5)
+          place(pine, jx, sample.height + tall * 0.7, jz, 0.65 + unit * 0.28, tall, 0.65 + unit * 0.28, unit * 3)
+        } else if (sample.biome === BIOME.desert && unit > 0.84) {
+          place(desertPlants, jx, sample.height + 0.32, jz, 0.65, 0.5 + unit * 0.4, 0.65, unit * 8)
+        } else if (sample.biome === BIOME.alpine && unit < 0.22) {
+          place(rocks, jx, sample.height + 0.16, jz, 0.32 + unit, 0.26 + unit * 0.4, 0.32 + unit, unit * 5)
         }
       }
     }
@@ -497,12 +582,12 @@ export function createDiorama(container, { onSelectWaypoint } = {}) {
     pines.forEach((mesh, index) => mesh.material.color.copy(colors.canopy[index % colors.canopy.length]))
     rocks.material.color.copy(colors.stone)
     desertPlants.material.color.copy(colors.canopy[2])
+    tufts.material.color.copy(colors.canopy[0])
     travelerGlow.material.color.copy(colors.accent)
     travelerGlow.material.emissive.copy(colors.accent)
-    if (routeTraveled) {
-      routeTraveled.material.color.copy(colors.accent)
-      routeTraveled.material.emissive.copy(colors.accent)
-    }
+    travelerMast.material.emissive.copy(colors.accent)
+    crumbMaterial.color.copy(colors.accent)
+    crumbMaterial.emissive.copy(colors.accent)
     if (routePending) {
       const pending = mode === 'night' ? new THREE.Color(1, 1, 1) : colors.text.clone()
       routePending.material.color.copy(pending)
@@ -513,21 +598,81 @@ export function createDiorama(container, { onSelectWaypoint } = {}) {
   }
 
   function worldPoint(lat, lon, lift = 0.28) {
-    const [x, z] = latLonToWorld(lat, lon)
-    const sample = sampleCell(x, z)
+    const [x, z] = geo.latLonToWorld(lat, lon)
+    const sample = geo.sampleCell(x, z)
     return new THREE.Vector3(x, Math.max(sample.height, water) + lift, z)
+  }
+
+  function adoptPeriod(journey) {
+    const period = getPeriodForJourney(journey?.id)
+    const bounds = boundsForJourney(period, journey)
+    const nextKey = `${period.id}:${bounds.west.toFixed(2)}:${bounds.east.toFixed(2)}:${bounds.south.toFixed(2)}:${bounds.north.toFixed(2)}`
+    if (nextKey === worldKey) return period
+    worldKey = nextKey
+    geo = createGeoWorld(bounds, period.climate)
+    geo.buildField()
+    scatterClouds()
+    rebuildTerrain()
+    rebuildLabels(period)
+    intro = REDUCE_MOTION ? 1 : 0
+    return period
+  }
+
+  function densifyPath(path) {
+    const points = []
+    if (!Array.isArray(path) || path.length === 0) return points
+    for (let index = 0; index < path.length; index += 1) {
+      const [lat, lon] = path[index]
+      if (index === 0) {
+        points.push(worldPoint(lat, lon, 0.42))
+        continue
+      }
+      const [prevLat, prevLon] = path[index - 1]
+      const from = worldPoint(prevLat, prevLon, 0.42)
+      const to = worldPoint(lat, lon, 0.42)
+      const steps = Math.max(1, Math.ceil(from.distanceTo(to) / 0.34))
+      for (let step = 1; step <= steps; step += 1) {
+        const t = step / steps
+        points.push(worldPoint(
+          prevLat + (lat - prevLat) * t,
+          prevLon + (lon - prevLon) * t,
+          0.42,
+        ))
+      }
+    }
+    return points
+  }
+
+  function pointOnSampledRoute(progress) {
+    if (sampledRoute.length === 0) return null
+    if (sampledRoute.length === 1 || progress <= 0) return sampledRoute[0].clone()
+    const max = sampledRoute.length - 1
+    const exact = THREE.MathUtils.clamp(progress, 0, 1) * max
+    const index = Math.floor(exact)
+    const next = Math.min(max, index + 1)
+    return sampledRoute[index].clone().lerp(sampledRoute[next], exact - index)
   }
 
   function replacePending(points) {
     disposeRoute(routePending)
     const pending = colors.night ? new THREE.Color(1, 1, 1) : colors.text.clone()
-    routePending = makeTube(points, 0.09, pending, { emissiveIntensity: 0.08 })
-    if (routePending) routePending.material.opacity = 0.55
+    routePending = makeTube(points, 0.08, pending, { emissiveIntensity: 0.05, opacity: 0.38 })
   }
 
-  function replaceTraveled(points) {
-    disposeRoute(routeTraveled)
-    routeTraveled = makeTube(points, 0.16, colors.accent, { emissiveIntensity: 0.35 })
+  function layoutCrumbs(points) {
+    const stride = Math.max(1, Math.ceil(points.length / crumbs.instanceMatrix.count))
+    let count = 0
+    dummy.scale.setScalar(1)
+    dummy.rotation.set(0, 0, 0)
+    for (let index = 0; index < points.length && count < crumbs.instanceMatrix.count; index += stride) {
+      dummy.position.copy(points[index])
+      dummy.updateMatrix()
+      crumbs.setMatrixAt(count, dummy.matrix)
+      count += 1
+    }
+    crumbs.userData.total = count
+    crumbs.instanceMatrix.needsUpdate = true
+    crumbs.count = 0
   }
 
   function clearWaypoints() {
@@ -541,17 +686,18 @@ export function createDiorama(container, { onSelectWaypoint } = {}) {
   }
 
   function setJourney(journey, path) {
+    adoptPeriod(journey)
     currentPath = Array.isArray(path) ? path : []
     currentDistances = computePathDistances(currentPath)
+    sampledRoute = densifyPath(currentPath)
     clearWaypoints()
-    const points = currentPath.map(([lat, lon]) => worldPoint(lat, lon, 0.34))
-    replacePending(points)
-    replaceTraveled(points.slice(0, 2))
+    replacePending(sampledRoute)
+    layoutCrumbs(sampledRoute)
     ;(journey?.points || []).forEach((point, index) => {
       if (!Number.isFinite(point.lat) || !Number.isFinite(point.lon)) return
-      const position = worldPoint(point.lat, point.lon, 0.4)
+      const position = worldPoint(point.lat, point.lon, 0.48)
       const mesh = new THREE.Mesh(
-        new THREE.SphereGeometry(0.28, 12, 12),
+        new THREE.SphereGeometry(0.22, 12, 12),
         new THREE.MeshStandardMaterial({ color: colors.accent, roughness: 0.4, metalness: 0.08 }),
       )
       mesh.position.copy(position)
@@ -562,59 +708,63 @@ export function createDiorama(container, { onSelectWaypoint } = {}) {
       const modern = getModernName(point.name)
       const node = document.createElement('button')
       node.type = 'button'
-      node.className = 'journey-map-label'
-      node.innerHTML = `<span class="hist">${point.name}</span>${modern ? `<span class="modern">${modern}</span>` : ''}`
+      node.className = 'journey-map-label is-compact'
+      node.dataset.name = point.name
+      node.dataset.modern = modern || ''
+      node.dataset.index = String(index + 1).padStart(2, '0')
+      node.innerHTML = `<span class="hist">${node.dataset.index}</span>`
       node.addEventListener('click', (event) => {
         event.stopPropagation()
         onSelectWaypoint?.(index)
       })
       const label = new CSS2DObject(node)
-      label.position.copy(position).add(new THREE.Vector3(0, 0.85, 0))
+      label.position.copy(position).add(new THREE.Vector3(0, 0.7, 0))
       labelRoot.add(label)
-      waypointMarkers.push({ mesh, label, index })
+      waypointMarkers.push({ mesh, label, index, name: point.name, modern })
     })
-    setProgress(currentProgress)
+    setProgress(currentProgress, { follow: followMotion })
   }
 
-  function setProgress(progress) {
+  function setProgress(progress, { follow = followMotion } = {}) {
     currentProgress = progress
-    if (currentPath.length < 2) return
-    const target = (currentDistances.total || 0) * progress
-    const traveled = getTraveledPath(currentPath, currentDistances.distances || [], target)
-    const head = getPointAlongPath(currentPath, currentDistances.distances || [], target)
-    const now = performance.now()
-    const traveledPoints = traveled.map(([lat, lon]) => worldPoint(lat, lon, 0.38))
-    if (traveledPoints.length >= 2 && (now - lastTubeAt > 80 || progress === 0 || progress >= 1)) {
-      lastTubeAt = now
-      replaceTraveled(traveledPoints)
-    }
-    if (head) {
-      const position = worldPoint(head[0], head[1], 0.55)
-      traveler.position.copy(position)
-    }
+    followMotion = Boolean(follow)
+    if (sampledRoute.length < 2) return
+    const totalCrumbs = crumbs.userData.total || 0
+    crumbs.count = Math.max(1, Math.round(THREE.MathUtils.clamp(progress, 0, 1) * totalCrumbs))
+    const position = pointOnSampledRoute(progress)
+    if (position) traveler.position.copy(position)
   }
 
   function setActiveWaypoint(index) {
     waypointMarkers.forEach((marker) => {
       const active = marker.index === index
-      marker.mesh.scale.setScalar(active ? 1.45 : 1)
+      marker.mesh.scale.setScalar(active ? 1.5 : 1)
       marker.mesh.material.emissive = active ? colors.accent : new THREE.Color(0x000000)
       marker.mesh.material.emissiveIntensity = active ? 0.45 : 0
-      marker.label.element.classList.toggle('is-active', active)
+      const node = marker.label.element
+      node.classList.toggle('is-active', active)
+      node.classList.toggle('is-compact', !active)
+      if (active) {
+        node.innerHTML = `<span class="hist">${marker.name}</span>${
+          marker.modern ? `<span class="modern">${marker.modern}</span>` : ''
+        }`
+      } else {
+        node.innerHTML = `<span class="hist">${node.dataset.index}</span>`
+      }
     })
   }
 
   function fitRoute() {
-    let target = new THREE.Vector3(0, 1.6, 0)
-    if (currentPath.length >= 2) {
-      const points = currentPath.map(([lat, lon]) => worldPoint(lat, lon))
-      const box = new THREE.Box3().setFromPoints(points)
+    followMotion = false
+    let target = new THREE.Vector3(0, 1.2, 0)
+    if (sampledRoute.length >= 2) {
+      const box = new THREE.Box3().setFromPoints(sampledRoute)
       const center = box.getCenter(new THREE.Vector3())
-      target.set(center.x * 0.42, 1.6, center.z * 0.42)
+      target.set(center.x * 0.35, 1.2, center.z * 0.35)
     }
     controls.target.copy(target)
     camera.position.set(HOME.x + target.x, HOME.y, HOME.z + target.z)
-    camera.zoom = 1.04
+    camera.zoom = 1.08
     camera.updateProjectionMatrix()
     controls.update()
   }
@@ -623,7 +773,7 @@ export function createDiorama(container, { onSelectWaypoint } = {}) {
     const width = container.clientWidth || 1
     const height = container.clientHeight || 1
     const aspect = width / height
-    const halfHeight = 34
+    const halfHeight = 32
     camera.left = -halfHeight * aspect
     camera.right = halfHeight * aspect
     camera.top = halfHeight
@@ -645,27 +795,62 @@ export function createDiorama(container, { onSelectWaypoint } = {}) {
   }
   renderer.domElement.addEventListener('click', onClick)
 
+  const projected = new THREE.Vector3()
+  function screenOf(object) {
+    object.getWorldPosition(projected)
+    projected.project(camera)
+    return {
+      x: (projected.x * 0.5 + 0.5) * (container.clientWidth || 1),
+      y: (-projected.y * 0.5 + 0.5) * (container.clientHeight || 1),
+    }
+  }
+
+  function declutterLabels() {
+    const waypointScreens = waypointMarkers.map((marker) => ({
+      active: marker.label.element.classList.contains('is-active'),
+      ...screenOf(marker.label),
+    }))
+    staticLabels.forEach((label) => {
+      const pos = screenOf(label)
+      const blocked = waypointScreens.some((waypoint) => {
+        const dx = waypoint.x - pos.x
+        const dy = waypoint.y - pos.y
+        const pad = waypoint.active ? 130 : 56
+        return dx * dx + dy * dy < pad * pad
+      })
+      label.element.classList.toggle('is-occluded', blocked)
+    })
+  }
+
   const clock = new THREE.Clock()
+  let labelPass = 0
   function tick() {
     if (disposed) return
     const elapsed = clock.getElapsedTime()
+    if (followMotion && sampledRoute.length) {
+      const target = traveler.position.clone()
+      target.y = 1.15
+      controls.target.lerp(target, 0.14)
+      camera.position.lerp(target.clone().add(followOffset), 0.14)
+    }
     controls.update()
     if (intro < 1) {
-      intro = Math.min(1, intro + 0.018)
+      intro = Math.min(1, intro + 0.02)
       const t = 1 - (1 - intro) ** 3
-      slabGroup.scale.set(0.94 + 0.06 * t, 0.74 + 0.26 * t, 0.94 + 0.06 * t)
+      slabGroup.scale.setScalar(0.97 + 0.03 * t)
     }
     if (!REDUCE_MOTION) {
       clouds.forEach((cloud, index) => {
         cloud.position.x += cloud.userData.speed * 0.012
         cloud.position.y += Math.sin(elapsed * 0.35 + index) * 0.003
-        if (cloud.position.x > halfX + 8) cloud.position.x = -halfX - 8
+        if (cloud.position.x > halfX + 10) cloud.position.x = -halfX - 10
       })
-      travelerGlow.position.y = Math.sin(elapsed * 2.4) * 0.08
+      travelerGlow.position.y = 1.55 + Math.sin(elapsed * 2.4) * 0.06
       travelerRing.rotation.z = elapsed * 0.6
       const shader = waterMesh.material.userData.waterShader
       if (shader) shader.uniforms.uWaterTime.value = elapsed
     }
+    if ((labelPass += 1) % 4 === 0) declutterLabels()
     renderer.render(scene, camera)
     labelRenderer.render(scene, camera)
     frameId = window.requestAnimationFrame(tick)

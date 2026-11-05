@@ -26,6 +26,7 @@ import {
   getWaypointDistances,
   getWaypointIndexForDistance,
 } from '../lib/mapGeometry'
+import { getPeriodForJourney } from '../data/historicalPeriods'
 
 const PLAYBACK_SPEEDS = [1, 2, 4]
 
@@ -78,6 +79,10 @@ function MapReaderPage() {
 
   const selectedWaypoint = getWaypointIndexForDistance(waypointDistances, total * progress)
   const currentPoint = activeJourney?.points?.[selectedWaypoint] || activeJourney?.points?.[0]
+  const activePeriod = useMemo(
+    () => getPeriodForJourney(activeJourney?.id),
+    [activeJourney?.id],
+  )
   const currentDistance = total * progress
 
   useEffect(() => {
@@ -174,6 +179,7 @@ function MapReaderPage() {
             {activeJourney ? (
               <JourneyMap
                 activeWaypointIndex={selectedWaypoint}
+                follow={isPlaying}
                 journey={activeJourney}
                 mode={mode}
                 onReady={(controls) => { mapControlsRef.current = controls }}
@@ -229,6 +235,11 @@ function MapReaderPage() {
                     {formatMiles(total)} mi · {total.toFixed(0)} km
                   </span>
                 </div>
+                <p className="map-period-chip">
+                  {activePeriod.era}
+                  <span>{activePeriod.label}</span>
+                  <span>{activePeriod.years}</span>
+                </p>
               </article>
             </div>
 
