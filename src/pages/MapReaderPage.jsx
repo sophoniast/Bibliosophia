@@ -29,12 +29,6 @@ import {
 
 const PLAYBACK_SPEEDS = [1, 2, 4]
 
-const BASE_LAYERS = [
-  { id: 'map', label: 'Map' },
-  { id: 'satellite', label: 'Satellite' },
-  { id: 'terrain', label: 'Terrain' },
-]
-
 function MapReaderPage() {
   const { mode, palette, toggleMode } = useTheme()
   const playbackRef = useRef({ lastTs: 0, speed: 1 })
@@ -48,7 +42,6 @@ function MapReaderPage() {
   const [isPlaying, setIsPlaying] = useState(false)
   const [playbackSpeed, setPlaybackSpeed] = useState(1)
   const [isLoreExpanded, setIsLoreExpanded] = useState(false)
-  const [baseLayer, setBaseLayer] = useState('map')
 
   useEffect(() => {
     let isCancelled = false
@@ -180,13 +173,12 @@ function MapReaderPage() {
           <div className="map-canvas">
             {activeJourney ? (
               <JourneyMap
-                accent={palette.accent}
                 activeWaypointIndex={selectedWaypoint}
-                baseLayer={baseLayer}
                 journey={activeJourney}
                 mode={mode}
                 onReady={(controls) => { mapControlsRef.current = controls }}
                 onSelectWaypoint={selectWaypoint}
+                palette={palette}
                 path={activePath}
                 progress={progress}
               />
@@ -269,18 +261,6 @@ function MapReaderPage() {
                 </button>
               </div>
 
-              <div className="map-basemap-toggle map-hud-panel" role="group" aria-label="Basemap">
-                {BASE_LAYERS.map((layer) => (
-                  <button
-                    key={layer.id}
-                    className={`map-speed-button${baseLayer === layer.id ? ' active' : ''}`}
-                    onClick={() => setBaseLayer(layer.id)}
-                    type="button"
-                  >
-                    {layer.label}
-                  </button>
-                ))}
-              </div>
             </div>
 
             <div className="map-hud-bottom">
